@@ -9,6 +9,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "founder";
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const PUBLIC_DIR = join(process.cwd(), "public");
 const DATA_DIR = join(process.cwd(), "data");
 const ACCOUNTS_FILE = join(DATA_DIR, "students.json");
@@ -19,6 +20,7 @@ const scrypt = promisify(nodeScrypt);
 const activeSessions = new Map();
 const activeAdminSessions = new Set();
 const freeCourseSlugs = new Set(["image-over-explanation", "metronome-read-through", "no-excuse-weekly-plan", "ownership-checklist"]);
+let dbPoolPromise = null;
 
 const systemInstruction = `PURPOSE
 You are the core AI Mentor for Virtuoso Academy, a legacy talent-development platform built to discover, sharpen, protect, and elevate upcoming artists. The academy turns a lifetime of leadership, discipline, and strategic experience into a digital studio and sanctuary for serious creators. Your mission is to cultivate raw talent, demand absolute dedication to the craft, and prepare artists mentally and strategically for the harsh realities of the music and creative industries.
@@ -91,7 +93,127 @@ function publicStudent(account) {
   };
 }
 
+function toIso(value) {
+  return value ? new Date(value).toISOString() : null;
+}
+
+function toAccount(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    passwordHash: row.password_hash,
+    createdAt: toIso(row.created_at)
+  };
+}
+
+function toEnrollment(row) {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    slug: row.slug,
+    status: row.status,
+    progress: Number(row.progress || 0),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
+function toSubmission(row, revisions = []) {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    slug: row.slug,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    ...(row.critique_body
+      ? {
+          critique: {
+            body: row.critique_body,
+            createdAt: toIso(row.critique_created_at)
+          }
+        }
+      : {}),
+    ...(revisions.length ? { revisions } : {})
+  };
+}
+
+async function ensureDatabase(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS students (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_notes (
+      student_id TEXT PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+      note TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Active',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS enrollments (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Enrolled',
+      progress INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ,
+      UNIQUE(student_id, slug)
+    );
+
+    CREATE TABLE IF NOT EXISTS submissions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Submitted',
+      critique_body TEXT,
+      critique_created_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS submission_revisions (
+      id TEXT PRIMARY KEY,
+      submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+async function getDbPool() {
+  if (!DATABASE_URL) return null;
+  if (!dbPoolPromise) {
+    dbPoolPromise = (async () => {
+      const { Pool } = await import("pg");
+      const pool = new Pool({
+        connectionString: DATABASE_URL,
+        ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined
+      });
+      await ensureDatabase(pool);
+      return pool;
+    })();
+  }
+  return dbPoolPromise;
+}
+
 async function readAccounts() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM students ORDER BY created_at ASC");
+    return result.rows.map(toAccount);
+  }
+
   try {
     return JSON.parse(await readFile(ACCOUNTS_FILE, "utf8"));
   } catch {
@@ -100,11 +222,39 @@ async function readAccounts() {
 }
 
 async function saveAccounts(accounts) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const account of accounts) {
+      await pool.query(
+        `
+          INSERT INTO students (id, name, email, password_hash, created_at)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
+            password_hash = EXCLUDED.password_hash
+        `,
+        [account.id, account.name, account.email, account.passwordHash, account.createdAt]
+      );
+    }
+    return;
+  }
+
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
 }
 
 async function readAdminNotes() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM admin_notes");
+    return result.rows.reduce((notes, row) => {
+      notes[row.student_id] = row.note || "";
+      notes[`${row.student_id}:status`] = row.status || "Active";
+      return notes;
+    }, {});
+  }
+
   try {
     return JSON.parse(await readFile(ADMIN_NOTES_FILE, "utf8"));
   } catch {
@@ -113,11 +263,41 @@ async function readAdminNotes() {
 }
 
 async function saveAdminNotes(notes) {
+  const pool = await getDbPool();
+  if (pool) {
+    const studentIds = new Set(
+      Object.keys(notes)
+        .map((key) => key.replace(/:status$/, ""))
+        .filter(Boolean)
+    );
+
+    for (const studentId of studentIds) {
+      await pool.query(
+        `
+          INSERT INTO admin_notes (student_id, note, status, updated_at)
+          VALUES ($1, $2, $3, NOW())
+          ON CONFLICT (student_id) DO UPDATE SET
+            note = EXCLUDED.note,
+            status = EXCLUDED.status,
+            updated_at = NOW()
+        `,
+        [studentId, notes[studentId] || "", notes[`${studentId}:status`] || "Active"]
+      );
+    }
+    return;
+  }
+
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(ADMIN_NOTES_FILE, JSON.stringify(notes, null, 2));
 }
 
 async function readEnrollments() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM enrollments ORDER BY created_at ASC");
+    return result.rows.map(toEnrollment);
+  }
+
   try {
     return JSON.parse(await readFile(ENROLLMENTS_FILE, "utf8"));
   } catch {
@@ -126,11 +306,55 @@ async function readEnrollments() {
 }
 
 async function saveEnrollments(enrollments) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const enrollment of enrollments) {
+      await pool.query(
+        `
+          INSERT INTO enrollments (id, student_id, slug, status, progress, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            progress = EXCLUDED.progress,
+            updated_at = EXCLUDED.updated_at
+        `,
+        [
+          enrollment.id,
+          enrollment.studentId,
+          enrollment.slug,
+          enrollment.status || "Enrolled",
+          Number(enrollment.progress || 0),
+          enrollment.createdAt,
+          enrollment.updatedAt || null
+        ]
+      );
+    }
+    return;
+  }
+
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(ENROLLMENTS_FILE, JSON.stringify(enrollments, null, 2));
 }
 
 async function readSubmissions() {
+  const pool = await getDbPool();
+  if (pool) {
+    const [submissionResult, revisionResult] = await Promise.all([
+      pool.query("SELECT * FROM submissions ORDER BY created_at ASC"),
+      pool.query("SELECT * FROM submission_revisions ORDER BY created_at ASC")
+    ]);
+    const revisionsBySubmission = revisionResult.rows.reduce((grouped, row) => {
+      grouped[row.submission_id] ||= [];
+      grouped[row.submission_id].push({
+        id: row.id,
+        body: row.body,
+        createdAt: toIso(row.created_at)
+      });
+      return grouped;
+    }, {});
+    return submissionResult.rows.map((row) => toSubmission(row, revisionsBySubmission[row.id] || []));
+  }
+
   try {
     return JSON.parse(await readFile(SUBMISSIONS_FILE, "utf8"));
   } catch {
@@ -139,6 +363,51 @@ async function readSubmissions() {
 }
 
 async function saveSubmissions(submissions) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const submission of submissions) {
+      await pool.query(
+        `
+          INSERT INTO submissions (
+            id, student_id, slug, title, body, status, critique_body, critique_created_at, created_at, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          ON CONFLICT (id) DO UPDATE SET
+            title = EXCLUDED.title,
+            body = EXCLUDED.body,
+            status = EXCLUDED.status,
+            critique_body = EXCLUDED.critique_body,
+            critique_created_at = EXCLUDED.critique_created_at,
+            updated_at = EXCLUDED.updated_at
+        `,
+        [
+          submission.id,
+          submission.studentId,
+          submission.slug,
+          submission.title,
+          submission.body,
+          submission.status || "Submitted",
+          submission.critique?.body || null,
+          submission.critique?.createdAt || null,
+          submission.createdAt,
+          submission.updatedAt || null
+        ]
+      );
+
+      for (const revision of submission.revisions || []) {
+        await pool.query(
+          `
+            INSERT INTO submission_revisions (id, submission_id, body, created_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id) DO UPDATE SET body = EXCLUDED.body
+          `,
+          [revision.id, submission.id, revision.body, revision.createdAt]
+        );
+      }
+    }
+    return;
+  }
+
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(SUBMISSIONS_FILE, JSON.stringify(submissions, null, 2));
 }

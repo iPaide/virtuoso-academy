@@ -2,7 +2,7 @@
 
 ## Render
 
-This app is configured for Render with `render.yaml`.
+This app is configured for Render with `render.yaml`, including a Render Postgres database.
 
 1. Push this repo to GitHub, GitLab, or Bitbucket.
 2. In Render, create a new Blueprint from the repo.
@@ -11,4 +11,4 @@ This app is configured for Render with `render.yaml`.
    - `GEMINI_API_KEY` when ready for live AI responses
 4. Deploy.
 
-The MVP currently stores student, enrollment, and submission JSON files on local disk. On Render free web services, disk data is ephemeral. Use this deployment for public testing and move to a managed database before real students.
+Student accounts, enrollments, submissions, critiques, revisions, and founder notes use Postgres when `DATABASE_URL` is present. Local development falls back to ignored JSON files in `data/`.
