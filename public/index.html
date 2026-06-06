@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Virtuoso Academy Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#home" aria-label="Virtuoso Academy home">
+          <span class="brand-mark">VA</span>
+          <span>
+            <strong>Virtuoso Academy</strong>
+            <small>Artist Mentor</small>
+          </span>
+        </a>
+        <nav aria-label="Primary navigation">
+          <a href="#mission">Mission</a>
+          <a href="#programs">Programs</a>
+          <a href="#method">Method</a>
+          <a href="#studio">Studio</a>
+          <a href="#sessions">Sessions</a>
+          <a href="#join">Join</a>
+          <button class="ghost-button" id="authButton" type="button">Sign in</button>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" id="home">
+          <div class="hero-copy">
+            <p class="eyebrow">Legacy talent development</p>
+            <h1>A modern academy for the underdogs.</h1>
+            <p>
+              Virtuoso Academy turns a lifetime of leadership, discipline, and strategic experience into an
+              interactive mentorship platform for upcoming artists ready to sharpen the pen and survive the business.
+            </p>
+            <div class="hero-actions">
+              <a class="primary-button" href="#studio">Enter The Studio</a>
+              <button class="secondary-button" id="samplePrompt" type="button">Load verse prompt</button>
+            </div>
+            <div class="hero-metrics" aria-label="Academy focus areas">
+              <div>
+                <strong>24/7</strong>
+                <span>Studio access</span>
+              </div>
+              <div>
+                <strong>4</strong>
+                <span>Growth tracks</span>
+              </div>
+              <div>
+                <strong>1</strong>
+                <span>Founder standard</span>
+              </div>
+            </div>
+          </div>
+          <div class="hero-panel" aria-label="Mentor standards">
+            <div>
+              <span class="stat">01</span>
+              <strong>Digital studio</strong>
+              <p>A focused sanctuary where lyrics, poetry, and concepts can be tested away from social media noise.</p>
+            </div>
+            <div>
+              <span class="stat">02</span>
+              <strong>High-standard leadership</strong>
+              <p>Direct mentorship that demands repetition, originality, breath control, and emotional truth.</p>
+            </div>
+            <div>
+              <span class="stat">03</span>
+              <strong>Industry armor</strong>
+              <p>Guidance on rejection, intellectual property, bad rooms, contracts, and protecting the authentic voice.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="onboarding-band" id="how-it-works">
+          <div class="section-heading">
+            <p class="eyebrow">How it works</p>
+            <h2>Five moves. No confusion. Get in the ring and work.</h2>
+            <p>
+              Virtuoso Academy is built around action. Create the account, choose the drill, submit the work,
+              take the critique, and revise until the pen stops making excuses.
+            </p>
+          </div>
+          <div class="onboarding-grid">
+            <article>
+              <span>01</span>
+              <h3>Create your student account</h3>
+              <p>Open your dashboard so your work, courses, submissions, critiques, and revisions stay on record.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Choose a course or free drill</h3>
+              <p>Start with a focused assignment from Write, Perform, Build, or Protect.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Submit real work</h3>
+              <p>Bring lyrics, drill results, concepts, or revision notes with enough substance to judge.</p>
+            </article>
+            <article>
+              <span>04</span>
+              <h3>Get critique</h3>
+              <p>The mentor marks what works, what is weak, and what the next version must prove.</p>
+            </article>
+            <article>
+              <span>05</span>
+              <h3>Revise sharper</h3>
+              <p>Version two is where discipline shows. The archive tracks whether the craft is improving.</p>
+            </article>
+          </div>
+          <div class="onboarding-actions">
+            <a class="primary-button" href="/courses">Start with a free drill</a>
+            <button class="secondary-button" id="startAccountButton" type="button">Create student account</button>
+            <a class="ghost-button" href="/courses">View courses</a>
+          </div>
+        </section>
+
+        <section class="mission-band" id="mission">
+          <div class="mission-intro">
+            <p class="eyebrow">The standard</p>
+            <h2>A legacy project built to mentor, protect, and prepare.</h2>
+            <p>
+              This is not a passive blog or a portfolio. It is a live academy where raw passion gets structure,
+              pressure, and a path toward professional craft.
+            </p>
+          </div>
+          <div class="mission-grid">
+            <article>
+              <span class="stat">Studio</span>
+              <h3>Immediate craft feedback</h3>
+              <p>Artists bring full verses, hooks, poems, and concepts into the ring for high-level critique.</p>
+            </article>
+            <article>
+              <span class="stat">Discipline</span>
+              <h3>Relentless standards</h3>
+              <p>The mentor calls out lazy concepts, predictable patterns, weak imagery, and under-revised bars.</p>
+            </article>
+            <article>
+              <span class="stat">Shield</span>
+              <h3>Business survival</h3>
+              <p>The platform teaches artists to protect their value, their rights, their mind, and their voice.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="programs-section" id="programs">
+          <div class="section-heading">
+            <p class="eyebrow">Academy model</p>
+            <h2>Learning paths with pressure, guidance, and accountability.</h2>
+            <p>
+              The aim is a full learning ecosystem: artists can enter through instant critique, then grow into guided
+              tracks, industry protection, and long-term mentorship.
+            </p>
+          </div>
+          <div class="program-grid">
+            <article class="program-card featured">
+              <div class="program-visual studio-visual" aria-hidden="true"></div>
+              <span class="roadmap-step">Live</span>
+              <h3>The Studio</h3>
+              <p>Immediate AI-powered critique for lyrics, hooks, poems, concepts, and career questions.</p>
+              <a href="#studio">Enter critique</a>
+            </article>
+            <article class="program-card">
+              <div class="program-visual write-visual" aria-hidden="true"></div>
+              <span class="roadmap-step">Track</span>
+              <h3>Write</h3>
+              <p>Imagery, rhyme architecture, cadence, storytelling, hook pressure, and revision discipline.</p>
+            </article>
+            <article class="program-card">
+              <div class="program-visual perform-visual" aria-hidden="true"></div>
+              <span class="roadmap-step">Track</span>
+              <h3>Perform</h3>
+              <p>Breath control, delivery, confidence, presence, rehearsal structure, and vocal identity.</p>
+            </article>
+            <article class="program-card">
+              <div class="program-visual build-visual" aria-hidden="true"></div>
+              <span class="roadmap-step">Track</span>
+              <h3>Build</h3>
+              <p>Release strategy, audience development, brand clarity, collaboration choices, and momentum.</p>
+            </article>
+            <article class="program-card">
+              <div class="program-visual protect-visual" aria-hidden="true"></div>
+              <span class="roadmap-step">Shield</span>
+              <h3>Protect</h3>
+              <p>IP basics, contract red flags, publishing awareness, fake opportunity filters, and mental resilience.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="method-section" id="method">
+          <div class="section-heading">
+            <p class="eyebrow">The Method</p>
+            <h2>A clear path from raw work to sharper craft.</h2>
+            <p>
+              Students do not come here to browse motivation. They bring work, take critique, revise under pressure,
+              and build the discipline to protect their voice in the business.
+            </p>
+          </div>
+          <div class="roadmap">
+            <article>
+              <span class="roadmap-step">Step 01</span>
+              <h3>Bring the Work</h3>
+              <p>Submit lyrics, hooks, poems, concepts, or course assignments without hiding behind polish.</p>
+            </article>
+            <article>
+              <span class="roadmap-step">Step 02</span>
+              <h3>Take the Critique</h3>
+              <p>Receive direct feedback on imagery, cadence, structure, originality, and emotional truth.</p>
+            </article>
+            <article>
+              <span class="roadmap-step">Step 03</span>
+              <h3>Revise With Pressure</h3>
+              <p>Turn weak first passes into sharper second versions through assignments and saved revisions.</p>
+            </article>
+            <article>
+              <span class="roadmap-step">Step 04</span>
+              <h3>Build and Protect</h3>
+              <p>Strengthen identity, release strategy, ownership awareness, and the discipline to survive bad rooms.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="join-section" id="join">
+          <div class="join-panel">
+            <div>
+              <p class="eyebrow">Student access</p>
+              <h2>Step into the academy when you are ready to work.</h2>
+              <p>
+                Create your account, enter the course catalog, and start turning critique into disciplined training.
+                The dashboard opens after sign-up.
+              </p>
+            </div>
+            <div class="join-actions">
+              <button class="primary-button" id="joinButton" type="button">Create student account</button>
+              <a class="secondary-button" href="/courses">Preview courses</a>
+            </div>
+          </div>
+        </section>
+
+        <section class="studio-layout" id="studio">
+          <aside class="sidebar" id="sessions">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Archive</p>
+                <h2>Sessions</h2>
+              </div>
+              <button class="icon-button" id="newSession" type="button" aria-label="Start new session">+</button>
+            </div>
+            <div class="session-list" id="sessionList"></div>
+          </aside>
+
+          <section class="studio">
+            <div class="studio-header">
+              <div>
+                <p class="eyebrow">The Studio</p>
+                <h2>Live critique room</h2>
+              </div>
+              <div class="profile-pill" id="profilePill">Guest artist</div>
+            </div>
+
+            <div class="messages" id="messages" aria-live="polite"></div>
+
+            <form class="composer" id="chatForm">
+              <label for="messageInput">Submit lyrics, a hook, concept, or industry question</label>
+              <textarea id="messageInput" rows="7" placeholder="Drop the verse here. Do not protect it. Put it in the ring." required></textarea>
+              <div class="composer-actions">
+                <span id="statusText">Ready for the next rep.</span>
+                <button class="primary-button" id="sendButton" type="submit">Send to Mentor</button>
+              </div>
+            </form>
+          </section>
+        </section>
+
+      </main>
+    </div>
+
+    <dialog id="authDialog">
+      <form method="dialog" class="auth-card" id="authForm">
+        <div>
+          <p class="eyebrow" id="authEyebrow">Student access</p>
+          <h2 id="authTitle">Create your student account</h2>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Student access mode">
+          <button class="auth-tab active" id="signupTab" type="button">Sign up</button>
+          <button class="auth-tab" id="loginTab" type="button">Log in</button>
+        </div>
+        <label>
+          Artist name
+          <input id="artistName" name="artistName" autocomplete="name" placeholder="Your stage name" required />
+        </label>
+        <label>
+          Email
+          <input id="artistEmail" name="artistEmail" type="email" autocomplete="email" placeholder="artist@example.com" required />
+        </label>
+        <label>
+          Password
+          <input id="artistPassword" name="artistPassword" type="password" autocomplete="current-password" placeholder="Minimum 6 characters" minlength="6" required />
+        </label>
+        <p class="auth-note" id="authNote">
+          MVP note: student access is saved in this browser for testing. Production will use secure server authentication.
+        </p>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="button" id="closeAuth">Cancel</button>
+          <button class="primary-button" id="authSubmit" value="default" type="submit">Create account</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

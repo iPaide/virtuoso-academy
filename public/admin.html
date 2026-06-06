@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Virtuoso Academy Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell admin-page">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Virtuoso Academy home">
+          <span class="brand-mark">VA</span>
+          <span>
+            <strong>Virtuoso Academy</strong>
+            <small>Founder Admin</small>
+          </span>
+        </a>
+        <nav aria-label="Admin navigation">
+          <a href="/">Main site</a>
+          <button class="ghost-button" id="adminLogoutButton" type="button">Sign out</button>
+        </nav>
+      </header>
+
+      <main class="admin-main">
+        <section class="admin-section" id="admin">
+          <div class="admin-shell">
+            <div class="section-heading">
+              <p class="eyebrow">Founder cockpit</p>
+              <h1>See the academy breathing.</h1>
+              <p>
+                Review student growth, monitor signups, and keep private founder notes on who needs pressure,
+                protection, or a sharper next assignment.
+              </p>
+              <button class="primary-button" id="adminLoginButton" type="button">Unlock admin portal</button>
+            </div>
+
+            <div class="admin-dashboard hidden" id="adminDashboard">
+              <div class="admin-metrics" aria-label="Founder metrics">
+                <div>
+                  <span>Students</span>
+                  <strong id="adminStudentCount">0</strong>
+                </div>
+                <div>
+                  <span>Live sessions</span>
+                  <strong id="adminActiveSessionCount">0</strong>
+                </div>
+                <div>
+                  <span>Founder notes</span>
+                  <strong id="adminNoteCount">0</strong>
+                </div>
+                <div>
+                  <span>Enrollments</span>
+                  <strong id="adminEnrollmentCount">0</strong>
+                </div>
+              </div>
+
+              <div class="admin-workspace">
+                <section class="student-directory" aria-label="Student directory">
+                  <div class="panel-heading">
+                    <div>
+                      <p class="eyebrow">Directory</p>
+                      <h2>Students</h2>
+                    </div>
+                    <button class="secondary-button" id="refreshAdmin" type="button">Refresh</button>
+                  </div>
+                  <div class="student-list" id="adminStudentList"></div>
+                </section>
+
+                <section class="student-notes" aria-label="Founder notes">
+                  <p class="eyebrow">Selected student</p>
+                  <h2 id="selectedStudentName">No student selected</h2>
+                  <p id="selectedStudentMeta">Choose a student from the directory.</p>
+                  <label>
+                    Status
+                    <input id="studentStatus" placeholder="Active, Watch, Needs review" />
+                  </label>
+                  <label>
+                    Founder note
+                    <textarea id="studentNote" rows="7" placeholder="Private observations, standards, next assignment, or risk flags."></textarea>
+                  </label>
+                  <button class="primary-button" id="saveStudentNote" type="button">Save founder note</button>
+                  <p class="auth-note" id="adminStatusText">Admin portal locked.</p>
+                </section>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="adminDialog">
+      <form method="dialog" class="auth-card" id="adminForm">
+        <div>
+          <p class="eyebrow">Founder access</p>
+          <h2>Unlock the admin portal</h2>
+        </div>
+        <label>
+          Founder password
+          <input id="adminPassword" name="adminPassword" type="password" autocomplete="current-password" placeholder="Enter founder password" required />
+        </label>
+        <p class="auth-note" id="adminNote">Local dev password is founder unless ADMIN_PASSWORD is set.</p>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="button" id="closeAdmin">Cancel</button>
+          <button class="primary-button" value="default" type="submit">Enter admin</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/admin.js" type="module"></script>
+  </body>
+</html>

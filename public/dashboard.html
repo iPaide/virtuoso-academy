@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Virtuoso Academy Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell dashboard-page">
+      <header class="topbar">
+        <a class="brand" href="/dashboard" aria-label="Virtuoso Academy dashboard">
+          <span class="brand-mark">VA</span>
+          <span>
+            <strong>Virtuoso Academy</strong>
+            <small>Student Dashboard</small>
+          </span>
+        </a>
+        <nav aria-label="Dashboard navigation">
+          <a href="/courses">Courses</a>
+          <a href="/#studio">Studio</a>
+          <a href="/">Main site</a>
+          <button class="ghost-button" id="dashboardSignOut" type="button">Sign out</button>
+        </nav>
+      </header>
+
+      <main>
+        <section class="dashboard-hero">
+          <div>
+            <p class="eyebrow">Student command center</p>
+            <h1 id="dashboardTitle">Your next rep is waiting.</h1>
+            <p id="dashboardSummary">Log in from the main site to unlock your training record.</p>
+            <div class="hero-actions">
+              <a class="primary-button" href="/courses">Browse courses</a>
+              <a class="secondary-button" href="/#studio">Enter Studio</a>
+            </div>
+          </div>
+          <div class="dashboard-card">
+            <span class="roadmap-step">Next action</span>
+            <h2 id="nextActionTitle">Choose a first drill</h2>
+            <p id="nextActionCopy">Start with a free drill, then bring the work into Studio for critique.</p>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <section class="dashboard-panel training-loop-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Your training loop</p>
+              <h2>Enroll. Submit. Critique. Revise. Repeat.</h2>
+              <p>The dashboard is not a trophy case. It is where the reps stay visible until the work gets sharper.</p>
+            </div>
+            <div class="loop-strip compact">
+              <article><span>01</span><strong>Enroll</strong><p>Choose the lane.</p></article>
+              <article><span>02</span><strong>Submit</strong><p>Put work on record.</p></article>
+              <article><span>03</span><strong>Critique</strong><p>Face the feedback.</p></article>
+              <article><span>04</span><strong>Revise</strong><p>Prove the growth.</p></article>
+              <article><span>05</span><strong>Repeat</strong><p>Stack the reps.</p></article>
+            </div>
+          </section>
+
+          <div class="dashboard-stats" aria-label="Student progress">
+            <article>
+              <span>Enrollments</span>
+              <strong id="dashboardEnrollmentCount">0</strong>
+            </article>
+            <article>
+              <span>Active track</span>
+              <strong id="dashboardTrack">Underdog</strong>
+            </article>
+            <article>
+              <span>Next studio rep</span>
+              <strong id="dashboardRep">Free drill</strong>
+            </article>
+            <article>
+              <span>Submissions</span>
+              <strong id="dashboardSubmissionCount">0</strong>
+            </article>
+          </div>
+
+          <section class="dashboard-panel">
+            <div class="section-heading">
+              <p class="eyebrow">My learning</p>
+              <h2>Course work in progress</h2>
+            </div>
+            <div class="learning-list" id="dashboardLearningList"></div>
+          </section>
+
+          <section class="dashboard-panel assignment-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Assignments</p>
+              <h2>Submit the next rep</h2>
+              <p>Choose an enrolled course, paste the work, and put it on record. The dashboard tracks the grind.</p>
+            </div>
+            <form class="submission-form" id="submissionForm">
+              <label>
+                Course
+                <select id="submissionCourse" required></select>
+              </label>
+              <label>
+                Submission title
+                <input id="submissionTitle" maxlength="90" placeholder="Eight-bar image revision" required />
+              </label>
+              <label class="full-span">
+                Lyrics, drill work, or notes
+                <textarea id="submissionBody" rows="8" placeholder="Paste the work here. Bring enough material for the mentor to judge the pen." required></textarea>
+              </label>
+              <div class="submission-actions">
+                <p id="submissionStatus">No submission yet. First rep is waiting.</p>
+                <button class="primary-button" id="submissionButton" type="submit">Submit work</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="dashboard-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Submission archive</p>
+              <h2>Work on record</h2>
+            </div>
+            <div class="submission-list" id="submissionList"></div>
+          </section>
+
+          <section class="dashboard-panel">
+            <div class="section-heading">
+              <p class="eyebrow">Training lanes</p>
+              <h2>What to build next</h2>
+            </div>
+            <div class="dashboard-lanes">
+              <article><span>Write</span><p>Tighten imagery, rhyme architecture, hooks, and story.</p></article>
+              <article><span>Perform</span><p>Pressure-test breath, cadence, voice, and presence.</p></article>
+              <article><span>Build</span><p>Shape identity, release rhythm, and audience momentum.</p></article>
+              <article><span>Protect</span><p>Study rights, contracts, ownership, and industry rooms.</p></article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/dashboard.js" type="module"></script>
+  </body>
+</html>
