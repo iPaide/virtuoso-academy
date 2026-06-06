@@ -743,6 +743,25 @@ async function handleReviseSubmission(req, res) {
   return sendJson(res, 200, { submission });
 }
 
+async function handleHealth(req, res) {
+  try {
+    const pool = await getDbPool();
+    if (pool) await pool.query("SELECT 1");
+    return sendJson(res, 200, {
+      ok: true,
+      storage: pool ? "postgres" : "json",
+      databaseReady: Boolean(pool)
+    });
+  } catch (error) {
+    return sendJson(res, 500, {
+      ok: false,
+      storage: "postgres",
+      databaseReady: false,
+      error: error.message
+    });
+  }
+}
+
 function buildGeminiPayload(messages) {
   return {
     system_instruction: { parts: [{ text: systemInstruction }] },
@@ -872,6 +891,10 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/chat") {
     return handleChat(req, res);
+  }
+
+  if (req.method === "GET" && req.url === "/api/health") {
+    return handleHealth(req, res);
   }
 
   if (req.method === "POST" && req.url === "/api/auth/signup") {
