@@ -53,7 +53,34 @@
                   <span>Enrollments</span>
                   <strong id="adminEnrollmentCount">0</strong>
                 </div>
+                <div>
+                  <span>Paid access</span>
+                  <strong id="adminPaidAccessCount">0</strong>
+                </div>
+                <div>
+                  <span>Needs critique</span>
+                  <strong id="adminNeedsCritiqueCount">0</strong>
+                </div>
+                <div>
+                  <span>Revision due</span>
+                  <strong id="adminRevisionDueCount">0</strong>
+                </div>
+                <div>
+                  <span>Intervention</span>
+                  <strong id="adminInterventionCount">0</strong>
+                </div>
               </div>
+
+              <section class="admin-attention" aria-label="Founder attention queue">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Attention queue</p>
+                    <h2>Who needs the founder's eye?</h2>
+                  </div>
+                  <button class="secondary-button" id="refreshAdmin" type="button">Refresh</button>
+                </div>
+                <div class="attention-list" id="adminAttentionList"></div>
+              </section>
 
               <div class="admin-workspace">
                 <section class="student-directory" aria-label="Student directory">
@@ -62,7 +89,6 @@
                       <p class="eyebrow">Directory</p>
                       <h2>Students</h2>
                     </div>
-                    <button class="secondary-button" id="refreshAdmin" type="button">Refresh</button>
                   </div>
                   <div class="student-list" id="adminStudentList"></div>
                 </section>
@@ -71,6 +97,9 @@
                   <p class="eyebrow">Selected student</p>
                   <h2 id="selectedStudentName">No student selected</h2>
                   <p id="selectedStudentMeta">Choose a student from the directory.</p>
+                  <div class="student-signal-grid" id="selectedStudentSignals"></div>
+                  <div class="selected-access-list" id="selectedStudentAccess"></div>
+                  <div class="selected-submission-list" id="selectedStudentSubmissions"></div>
                   <label>
                     Status
                     <input id="studentStatus" placeholder="Active, Watch, Needs review" />
@@ -83,6 +112,16 @@
                   <p class="auth-note" id="adminStatusText">Admin portal locked.</p>
                 </section>
               </div>
+
+              <section class="admin-submissions-board" aria-label="Submission board">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Submission board</p>
+                    <h2>Work waiting in the academy.</h2>
+                  </div>
+                </div>
+                <div class="admin-submission-list" id="adminSubmissionList"></div>
+              </section>
             </div>
           </div>
         </section>

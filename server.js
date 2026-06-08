@@ -1042,14 +1042,49 @@ async function handleAdminSummary(req, res) {
   const accessGrants = await readAccessGrants();
   const sessions = await readStudentSessions();
   const validSessionCount = sessions.filter((session) => new Date(session.expiresAt) > new Date()).length;
-  const students = accounts.map((account) => ({
-    ...publicStudent(account),
-    note: notes[account.id] || "",
-    status: notes[`${account.id}:status`] || "Active",
-    accessGrants: accessGrants.filter((grant) => grant.studentId === account.id),
-    enrollments: enrollments.filter((enrollment) => enrollment.studentId === account.id),
-    submissions: submissions.filter((submission) => submission.studentId === account.id)
-  }));
+  const activeGrantCount = accessGrants.filter((grant) => activeAccessStatuses.has(grant.status)).length;
+  const students = accounts.map((account) => {
+    const studentEnrollments = enrollments.filter((enrollment) => enrollment.studentId === account.id);
+    const studentSubmissions = submissions
+      .filter((submission) => submission.studentId === account.id)
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    const studentAccessGrants = accessGrants.filter((grant) => grant.studentId === account.id);
+    const activeAccessGrants = studentAccessGrants.filter((grant) => activeAccessStatuses.has(grant.status));
+    const needsCritique = studentSubmissions.filter((submission) => !submission.critique);
+    const revisionDue = studentSubmissions.filter((submission) => submission.status === "Revision due");
+    const revised = studentSubmissions.filter((submission) => submission.status === "Revised");
+    const latestSubmission = studentSubmissions[0] || null;
+    const latestActivityAt =
+      latestSubmission?.updatedAt || latestSubmission?.createdAt || studentEnrollments.at(-1)?.updatedAt || studentEnrollments.at(-1)?.createdAt || account.createdAt;
+    const needsIntervention =
+      needsCritique.length >= 2 ||
+      revisionDue.length >= 2 ||
+      String(notes[`${account.id}:status`] || "").toLowerCase().includes("watch") ||
+      String(notes[`${account.id}:status`] || "").toLowerCase().includes("intervention");
+
+    return {
+      ...publicStudent(account),
+      note: notes[account.id] || "",
+      status: notes[`${account.id}:status`] || "Active",
+      accessGrants: studentAccessGrants,
+      activeAccessGrants,
+      enrollments: studentEnrollments,
+      submissions: studentSubmissions,
+      signals: {
+        needsCritique: needsCritique.length,
+        revisionDue: revisionDue.length,
+        revised: revised.length,
+        needsIntervention,
+        latestActivityAt,
+        latestSubmissionTitle: latestSubmission?.title || "",
+        accessLabel: activeAccessGrants.map((grant) => grant.tier || grant.slug || grant.type).filter(Boolean).join(", ") || "First Rep"
+      }
+    };
+  });
+
+  const attentionQueue = students
+    .filter((student) => student.signals.needsCritique || student.signals.revisionDue || student.signals.needsIntervention)
+    .sort((a, b) => Number(b.signals.needsIntervention) - Number(a.signals.needsIntervention) || b.signals.needsCritique - a.signals.needsCritique);
 
   return sendJson(res, 200, {
     metrics: {
@@ -1058,9 +1093,14 @@ async function handleAdminSummary(req, res) {
       notes: Object.keys(notes).filter((key) => !key.endsWith(":status")).length,
       enrollments: enrollments.length,
       submissions: submissions.length,
-      paidAccess: accessGrants.filter((grant) => activeAccessStatuses.has(grant.status)).length,
+      paidAccess: activeGrantCount,
+      needsCritique: submissions.filter((submission) => !submission.critique).length,
+      revisionDue: submissions.filter((submission) => submission.status === "Revision due").length,
+      interventions: students.filter((student) => student.signals.needsIntervention).length,
       latestSignup: students.at(-1)?.createdAt || null
     },
+    attentionQueue,
+    submissions: submissions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)),
     students
   });
 }
