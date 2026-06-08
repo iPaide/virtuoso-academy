@@ -394,6 +394,26 @@ h3 {
   padding: 0 clamp(18px, 4vw, 56px) 40px;
 }
 
+.site-footer {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding: 24px clamp(18px, 4vw, 56px);
+  color: var(--muted);
+}
+
+.site-footer strong {
+  color: var(--text);
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .section-heading {
   max-width: 880px;
   margin-bottom: 20px;
@@ -586,6 +606,85 @@ h3 {
 .admin-shell {
   border-top: 1px solid var(--gold);
   padding-top: 28px;
+}
+
+.legal-main {
+  padding: clamp(110px, 14vw, 160px) clamp(18px, 4vw, 56px) 56px;
+}
+
+.legal-hero {
+  max-width: 960px;
+  margin-bottom: 24px;
+}
+
+.legal-hero h1 {
+  max-width: 840px;
+}
+
+.legal-hero p {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  line-height: 1.55;
+}
+
+.legal-hero span {
+  color: var(--gold);
+  font-weight: 900;
+}
+
+.ownership-callout {
+  margin-bottom: 24px;
+  border: 1px solid rgba(240, 195, 90, 0.48);
+  border-top: 3px solid var(--gold);
+  padding: clamp(22px, 4vw, 36px);
+  background:
+    linear-gradient(120deg, rgba(240, 195, 90, 0.14), transparent 58%),
+    rgba(14, 14, 14, 0.96);
+}
+
+.ownership-callout h2 {
+  max-width: 820px;
+  font-size: clamp(2rem, 4vw, 4rem);
+  line-height: 1;
+}
+
+.ownership-callout p {
+  max-width: 760px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.legal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.legal-grid article {
+  min-height: 230px;
+  padding: clamp(20px, 3vw, 28px);
+  background: rgba(14, 14, 14, 0.97);
+}
+
+.legal-grid h2 {
+  margin-bottom: 12px;
+  font-size: clamp(1.35rem, 2vw, 2rem);
+}
+
+.legal-grid p,
+.legal-note p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.legal-note {
+  max-width: 880px;
+  border-left: 3px solid var(--gold);
+  margin-top: 24px;
+  padding: 16px 0 16px 20px;
 }
 
 .courses-hero {
@@ -1594,6 +1693,7 @@ dialog::backdrop {
 
   .course-detail-grid,
   .lesson-list,
+  .legal-grid,
   .dashboard-stats,
   .dashboard-lanes,
   .submission-form,
@@ -1611,6 +1711,16 @@ dialog::backdrop {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .site-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .site-footer nav {
+    justify-content: flex-start;
+    width: 100%;
   }
 
   nav {

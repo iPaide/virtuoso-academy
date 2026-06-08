@@ -1611,11 +1611,13 @@ async function serveStatic(req, res) {
           ? "/admin.html"
           : url.pathname === "/dashboard"
             ? "/dashboard.html"
-        : url.pathname === "/courses"
-          ? "/courses.html"
-          : url.pathname.startsWith("/courses/")
-            ? "/course.html"
-          : url.pathname;
+            : url.pathname === "/courses"
+              ? "/courses.html"
+              : url.pathname.startsWith("/courses/")
+                ? "/course.html"
+                : ["/privacy", "/terms", "/ownership"].includes(url.pathname)
+                  ? "/legal.html"
+                  : url.pathname;
   const safePath = normalize(requestedPath).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(PUBLIC_DIR, safePath);
 
