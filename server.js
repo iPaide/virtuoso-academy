@@ -909,6 +909,7 @@ async function handleCreateCheckout(req, res) {
 
     const session = await stripe.checkout.sessions.create({
       ...sessionConfig,
+      payment_method_types: ["card"],
       customer_email: student.email,
       client_reference_id: student.id,
       allow_promotion_codes: true
