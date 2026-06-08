@@ -37,6 +37,8 @@ const elements = {
   artistEmail: document.querySelector("#artistEmail"),
   artistPassword: document.querySelector("#artistPassword"),
   profilePill: document.querySelector("#profilePill"),
+  mentorMode: document.querySelector("#mentorMode"),
+  submissionTarget: document.querySelector("#submissionTarget"),
   joinButton: document.querySelector("#joinButton"),
   startAccountButton: document.querySelector("#startAccountButton"),
   samplePrompt: document.querySelector("#samplePrompt"),
@@ -53,6 +55,8 @@ let authMode = "signup";
 let profile = loadJson(storageKeys.profile, null);
 let sessions = loadJson(storageKeys.sessions, []);
 let activeSessionId = localStorage.getItem(storageKeys.activeSessionId);
+let studioSubmissions = [];
+const requestedSubmissionId = new URLSearchParams(window.location.search).get("submission");
 
 function loadJson(key, fallback) {
   try {
@@ -111,6 +115,31 @@ function renderProfile() {
   }
 }
 
+function renderSubmissionTargets() {
+  if (!profile?.name) {
+    elements.submissionTarget.innerHTML = `<option value="">Log in to save critique</option>`;
+    elements.submissionTarget.disabled = true;
+    return;
+  }
+
+  if (!studioSubmissions.length) {
+    elements.submissionTarget.innerHTML = `<option value="">No submissions yet</option>`;
+    elements.submissionTarget.disabled = true;
+    return;
+  }
+
+  elements.submissionTarget.disabled = false;
+  elements.submissionTarget.innerHTML = `
+    <option value="">Do not save</option>
+    ${studioSubmissions
+      .map((submission) => `<option value="${escapeHtml(submission.id)}">${escapeHtml(submission.title)} · ${escapeHtml(submission.status)}</option>`)
+      .join("")}
+  `;
+  if (requestedSubmissionId && studioSubmissions.some((submission) => submission.id === requestedSubmissionId)) {
+    elements.submissionTarget.value = requestedSubmissionId;
+  }
+}
+
 function renderSessions() {
   elements.sessionList.innerHTML = "";
   sessions.forEach((session) => {
@@ -141,6 +170,7 @@ function renderMessages() {
 
 function render() {
   renderProfile();
+  renderSubmissionTargets();
   renderSessions();
   renderMessages();
 }
@@ -228,6 +258,34 @@ async function resetRequest(payload) {
   return data;
 }
 
+async function postJson(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Request failed.");
+  return data;
+}
+
+async function loadStudioSubmissions() {
+  if (!profile?.name) {
+    studioSubmissions = [];
+    renderSubmissionTargets();
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/submissions/me");
+    const data = await response.json();
+    studioSubmissions = response.ok ? data.submissions : [];
+  } catch {
+    studioSubmissions = [];
+  }
+  renderSubmissionTargets();
+}
+
 async function loadCurrentStudent() {
   try {
     const response = await fetch("/api/auth/me");
@@ -242,11 +300,13 @@ async function loadCurrentStudent() {
     profile = loadJson(storageKeys.profile, null);
   }
   renderProfile();
+  await loadStudioSubmissions();
 }
 
 async function signOut() {
   await fetch("/api/auth/logout", { method: "POST" });
   profile = null;
+  studioSubmissions = [];
   localStorage.removeItem(storageKeys.profile);
   render();
   location.hash = "join";
@@ -254,6 +314,8 @@ async function signOut() {
 
 async function sendMessage(content) {
   const session = getActiveSession();
+  const mode = elements.mentorMode.value;
+  const submissionId = elements.submissionTarget.value;
   session.messages.push({ role: "user", content });
   if (session.title === "New critique session") session.title = summarizeTitle(content);
 
@@ -270,7 +332,7 @@ async function sendMessage(content) {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: session.messages.slice(0, -1) })
+      body: JSON.stringify({ messages: session.messages.slice(0, -1), mode })
     });
 
     if (!response.ok || !response.body) {
@@ -288,7 +350,17 @@ async function sendMessage(content) {
       renderMessages();
     }
 
-    elements.statusText.textContent = "Critique saved. The next rep is waiting.";
+    if (submissionId) {
+      await postJson("/api/submissions/save-mentor-critique", {
+        id: submissionId,
+        body: assistantMessage.content,
+        mode
+      });
+      await loadStudioSubmissions();
+      elements.statusText.textContent = "Critique saved to the selected submission. Revision is due.";
+    } else {
+      elements.statusText.textContent = "Critique complete. Select a submission to save it into the archive.";
+    }
   } catch (error) {
     assistantMessage.content += `\n\nThe room hit a technical snag: ${error.message}. Check the backend and send it again.`;
     elements.statusText.textContent = "Connection failed.";

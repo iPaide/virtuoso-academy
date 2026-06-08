@@ -1601,6 +1601,25 @@ h3 {
   font-weight: 800;
 }
 
+.studio-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 190px) minmax(180px, 260px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.studio-controls label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.studio-controls select {
+  min-height: 42px;
+  margin-top: 6px;
+}
+
 .messages {
   display: flex;
   flex-direction: column;
@@ -1652,7 +1671,8 @@ h3 {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1669,14 +1689,16 @@ textarea {
   line-height: 1.5;
 }
 
-input {
+input,
+select {
   min-height: 48px;
   margin-top: 8px;
   padding: 0 12px;
 }
 
 textarea:focus,
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--gold);
 }
 
@@ -1893,6 +1915,11 @@ dialog::backdrop {
   .panel-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .studio-controls {
+    width: 100%;
+    grid-template-columns: 1fr;
   }
 
   .profile-pill {

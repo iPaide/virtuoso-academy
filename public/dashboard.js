@@ -156,7 +156,7 @@ function renderSubmissions(submissions) {
               ${submission.critique ? "Refresh critique" : "Request critique"}
             </button>
             <button class="primary-button" data-action="revise" data-id="${escapeHtml(submission.id)}" type="button">Submit revision</button>
-            <a href="/#studio">Take it to Studio</a>
+            <a href="/?submission=${encodeURIComponent(submission.id)}#studio">Take it to Studio</a>
           </div>
         </article>
       `;

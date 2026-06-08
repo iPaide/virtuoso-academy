@@ -67,6 +67,29 @@ GUARDRAILS
 - Never give empty praise. If a piece of work has flaws, point them out directly while giving a specific way to fix them.
 - Focus heavily on work ethic and repetition. Remind them that greatness is built on thousands of hours no one sees.`;
 
+const mentorModes = {
+  "lyric-critique": {
+    label: "Lyric Critique",
+    instruction:
+      "Focus on lyric craft: imagery, rhyme architecture, cadence, structure, emotional proof, weak filler, and a concrete revision assignment."
+  },
+  "hook-lab": {
+    label: "Hook Lab",
+    instruction:
+      "Focus on hook writing: title gravity, repetition, melodic memorability, emotional center, contrast with verses, and three sharper hook directions."
+  },
+  "industry-shield": {
+    label: "Industry Shield",
+    instruction:
+      "Focus on business survival: ownership, publishing, masters, splits, contracts, pressure language, red flags, and protective next steps. Do not provide legal advice; tell the artist when to consult a qualified attorney."
+  },
+  "mindset-reset": {
+    label: "Mindset Reset",
+    instruction:
+      "Focus on resilience and discipline: rejection, fear, consistency, practice structure, confidence without delusion, and the next non-negotiable rep."
+  }
+};
+
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -1497,6 +1520,34 @@ async function handleCritiqueSubmission(req, res) {
   return sendJson(res, 200, { submission });
 }
 
+async function handleSaveMentorCritique(req, res) {
+  const student = await getSessionStudent(req);
+  if (!student) return sendJson(res, 401, { error: "Student login required." });
+
+  const { id, body, mode } = await readBody(req);
+  const submissionId = String(id || "").trim();
+  const critiqueBody = String(body || "").trim();
+  if (!submissionId || critiqueBody.length < 40) {
+    return sendJson(res, 400, { error: "Choose a submission and generate a full mentor critique before saving." });
+  }
+
+  const submissions = await readSubmissions();
+  const submission = submissions.find((item) => item.id === submissionId && item.studentId === student.id);
+  if (!submission) return sendJson(res, 404, { error: "Submission not found." });
+
+  const selectedMode = mentorModes[getMentorMode(mode)];
+  submission.critique = {
+    body: `[${selectedMode.label}]\n${critiqueBody}`,
+    createdAt: new Date().toISOString()
+  };
+  submission.status = "Revision due";
+  submission.updatedAt = new Date().toISOString();
+  await saveSubmissions(submissions);
+  await updateEnrollmentAfterSubmission(student.id, submission.slug, "Revision due", 65);
+
+  return sendJson(res, 200, { submission });
+}
+
 async function handleReviseSubmission(req, res) {
   const student = await getSessionStudent(req);
   if (!student) return sendJson(res, 401, { error: "Student login required." });
@@ -1549,9 +1600,18 @@ async function handleHealth(req, res) {
   }
 }
 
-function buildGeminiPayload(messages) {
+function getMentorMode(mode) {
+  return mentorModes[mode] ? mode : "lyric-critique";
+}
+
+function buildModeInstruction(mode) {
+  const selectedMode = mentorModes[getMentorMode(mode)];
+  return `${systemInstruction}\n\nCURRENT MENTOR MODE: ${selectedMode.label}\n${selectedMode.instruction}\n\nWhen the artist submits work, answer in this structure: Ring Read, What Is Working, Weak Spots, Exact Fix, Next Rep. Keep the tone direct, protective, and actionable.`;
+}
+
+function buildGeminiPayload(messages, mode) {
   return {
-    system_instruction: { parts: [{ text: systemInstruction }] },
+    system_instruction: { parts: [{ text: buildModeInstruction(mode) }] },
     contents: messages.map((message) => ({
       role: message.role === "assistant" ? "model" : "user",
       parts: [{ text: message.content }]
@@ -1564,12 +1624,12 @@ function buildGeminiPayload(messages) {
   };
 }
 
-async function streamGemini(messages, res) {
+async function streamGemini(messages, mode, res) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildGeminiPayload(messages))
+    body: JSON.stringify(buildGeminiPayload(messages, mode))
   });
 
   if (!response.ok || !response.body) {
@@ -1599,12 +1659,19 @@ async function streamGemini(messages, res) {
   }
 }
 
-async function streamMock(messages, res) {
+async function streamMock(messages, mode, res) {
   const latest = messages.at(-1)?.content || "";
   const isLyrics = latest.split(/\s+/).length > 28 || latest.includes("\n");
+  const selectedMode = getMentorMode(mode);
+  const modeOpeners = {
+    "lyric-critique": "Ring Read: I am going straight to the tape.",
+    "hook-lab": "Ring Read: A hook has one job: make the listener come back.",
+    "industry-shield": "Ring Read: Protect the work before the room starts smiling at you.",
+    "mindset-reset": "Ring Read: Your mood is not the boss. The rep is."
+  };
   const response = isLyrics
-    ? `I am going straight to the tape.\n\nThe hunger is there, but the pen is circling familiar ground. Right now some lines are landing on emotion without enough image. Pain alone is not the punch. Detail is the glove. Give me the room, the streetlight, the phone call, the exact betrayal. That is where the verse starts bleeding truth.\n\nFix this in three passes:\n1. Cut every line that only says the feeling. Replace it with a scene that proves it.\n2. Break the predictable end-rhymes. Add internal pressure: consonants, mid-line flips, rhythm changes.\n3. Read it out loud with a metronome. If the breath folds before the bar, the bar is not ready.\n\nYou are not here to sound like the market. You are here to make the market adjust its ears. Back to the grind. Give me a sharper revision.`
-    : `Good. Now bring the real material into the ring.\n\nGive me a verse, hook, concept, or the industry situation you are facing. I will not hand you trophy talk. I will mark the weak spots, protect your voice, and show you the next rep the pen needs. Hunger beats budget when hunger has discipline behind it.`;
+    ? `${modeOpeners[selectedMode]}\n\nWhat Is Working: The hunger is there, and there is enough material to judge the intent.\n\nWeak Spots: Some lines are landing on emotion without enough proof. Pain alone is not the punch. Detail is the glove.\n\nExact Fix: Give me the room, the streetlight, the phone call, the exact betrayal. Cut every line that only says the feeling. Replace it with a scene, then break at least two predictable end-rhymes with internal pressure.\n\nNext Rep: Rewrite this with one sharper opening image, one rhythm switch, and one line that says less but reveals more. Bring version two back cleaner.`
+    : `${modeOpeners[selectedMode]}\n\nBring me the real material: a verse, hook, concept, contract situation, or pressure you are facing. I will not hand you trophy talk. I will mark the weak spots, protect your voice, and give you the next rep. Hunger beats budget when hunger has discipline behind it.`;
 
   for (const token of response.match(/.{1,18}(\s|$)/g) || [response]) {
     res.write(token);
@@ -1614,7 +1681,7 @@ async function streamMock(messages, res) {
 
 async function handleChat(req, res) {
   try {
-    const { messages } = await readBody(req);
+    const { messages, mode } = await readBody(req);
     if (!Array.isArray(messages) || messages.length === 0) {
       return sendJson(res, 400, { error: "messages are required" });
     }
@@ -1626,9 +1693,9 @@ async function handleChat(req, res) {
     });
 
     if (GEMINI_API_KEY) {
-      await streamGemini(messages, res);
+      await streamGemini(messages, getMentorMode(mode), res);
     } else {
-      await streamMock(messages, res);
+      await streamMock(messages, getMentorMode(mode), res);
     }
 
     res.end();
@@ -1736,6 +1803,10 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/submissions/critique") {
     return handleCritiqueSubmission(req, res);
+  }
+
+  if (req.method === "POST" && req.url === "/api/submissions/save-mentor-critique") {
+    return handleSaveMentorCritique(req, res);
   }
 
   if (req.method === "POST" && req.url === "/api/submissions/revise") {

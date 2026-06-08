@@ -258,7 +258,24 @@
                 <p class="eyebrow">The Studio</p>
                 <h2>Live critique room</h2>
               </div>
-              <div class="profile-pill" id="profilePill">Guest artist</div>
+              <div class="studio-controls" aria-label="Mentor engine controls">
+                <label>
+                  Mode
+                  <select id="mentorMode">
+                    <option value="lyric-critique">Lyric Critique</option>
+                    <option value="hook-lab">Hook Lab</option>
+                    <option value="industry-shield">Industry Shield</option>
+                    <option value="mindset-reset">Mindset Reset</option>
+                  </select>
+                </label>
+                <label>
+                  Save to submission
+                  <select id="submissionTarget">
+                    <option value="">Not connected</option>
+                  </select>
+                </label>
+                <div class="profile-pill" id="profilePill">Guest artist</div>
+              </div>
             </div>
 
             <div class="messages" id="messages" aria-live="polite"></div>
