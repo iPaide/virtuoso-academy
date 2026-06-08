@@ -39,7 +39,7 @@ if (!course) {
         <a class="secondary-button" href="/#studio">Take this to Studio</a>
         <a class="secondary-button" href="/courses">All courses</a>
       </div>
-      <p class="enrollment-status" id="enrollmentStatus">${course.price === "Free" ? "Free drill enrolls immediately with a student account." : "Premium enrollment will connect to checkout in the next build."}</p>
+      <p class="enrollment-status" id="enrollmentStatus">${course.price === "Free" ? "Free drill enrolls immediately with a student account." : "Premium enrollment requires paid access or a qualifying VIP tier."}</p>
     </section>
 
     <section class="course-detail-grid">
@@ -84,7 +84,7 @@ if (!course) {
       const response = await fetch("/api/enrollments/enroll", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: course.slug, price: course.price })
+        body: JSON.stringify({ slug: course.slug })
       });
       const data = await response.json();
 
@@ -95,7 +95,15 @@ if (!course) {
       }
 
       if (response.status === 402) {
-        status.textContent = `${data.error} Stripe checkout is the next ring.`;
+        status.textContent = "Opening secure checkout...";
+        const checkoutResponse = await fetch("/api/payments/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: course.slug })
+        });
+        const checkoutData = await checkoutResponse.json();
+        if (!checkoutResponse.ok) throw new Error(checkoutData.error || data.error || "Checkout is not ready.");
+        window.location.href = checkoutData.url;
         return;
       }
 

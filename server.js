@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { randomBytes, randomUUID, scrypt as nodeScrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { getCourse } from "./public/course-data.js";
 
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -10,17 +11,37 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "founder";
 const DATABASE_URL = process.env.DATABASE_URL || "";
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+const APP_URL = process.env.APP_URL || "";
 const PUBLIC_DIR = join(process.cwd(), "public");
 const DATA_DIR = join(process.cwd(), "data");
 const ACCOUNTS_FILE = join(DATA_DIR, "students.json");
 const ADMIN_NOTES_FILE = join(DATA_DIR, "admin-notes.json");
 const ENROLLMENTS_FILE = join(DATA_DIR, "enrollments.json");
 const SUBMISSIONS_FILE = join(DATA_DIR, "submissions.json");
+const ACCESS_GRANTS_FILE = join(DATA_DIR, "access-grants.json");
 const scrypt = promisify(nodeScrypt);
 const activeSessions = new Map();
 const activeAdminSessions = new Set();
 const freeCourseSlugs = new Set(["image-over-explanation", "metronome-read-through", "no-excuse-weekly-plan", "ownership-checklist"]);
+const activeAccessStatuses = new Set(["active", "paid", "trialing"]);
+const vipTiers = {
+  "academy-elite": {
+    name: "Academy Elite",
+    amount: 14900,
+    interval: "month",
+    description: "Full course access, saved critique cycles, and priority development path."
+  },
+  "inner-circle": {
+    name: "Inner Circle",
+    amount: 49900,
+    interval: "month",
+    description: "High-touch founder mentorship lane with deeper strategy and accountability."
+  }
+};
 let dbPoolPromise = null;
+let stripeClientPromise = null;
 
 const systemInstruction = `PURPOSE
 You are the core AI Mentor for Virtuoso Academy, a legacy talent-development platform built to discover, sharpen, protect, and elevate upcoming artists. The academy turns a lifetime of leadership, discipline, and strategic experience into a digital studio and sanctuary for serious creators. Your mission is to cultivate raw talent, demand absolute dedication to the craft, and prepare artists mentally and strategically for the harsh realities of the music and creative industries.
@@ -119,6 +140,22 @@ function toEnrollment(row) {
   };
 }
 
+function toAccessGrant(row) {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    type: row.type,
+    slug: row.slug || "",
+    tier: row.tier || "",
+    status: row.status,
+    stripeSessionId: row.stripe_session_id || "",
+    stripeCustomerId: row.stripe_customer_id || "",
+    stripeSubscriptionId: row.stripe_subscription_id || "",
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
 function toSubmission(row, revisions = []) {
   return {
     id: row.id,
@@ -167,6 +204,20 @@ async function ensureDatabase(pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ,
       UNIQUE(student_id, slug)
+    );
+
+    CREATE TABLE IF NOT EXISTS access_grants (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      slug TEXT,
+      tier TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      stripe_session_id TEXT UNIQUE,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS submissions (
@@ -336,6 +387,63 @@ async function saveEnrollments(enrollments) {
   await writeFile(ENROLLMENTS_FILE, JSON.stringify(enrollments, null, 2));
 }
 
+async function readAccessGrants() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM access_grants ORDER BY created_at ASC");
+    return result.rows.map(toAccessGrant);
+  }
+
+  try {
+    return JSON.parse(await readFile(ACCESS_GRANTS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+async function saveAccessGrants(grants) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const grant of grants) {
+      await pool.query(
+        `
+          INSERT INTO access_grants (
+            id, student_id, type, slug, tier, status, stripe_session_id, stripe_customer_id,
+            stripe_subscription_id, created_at, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT (id) DO UPDATE SET
+            type = EXCLUDED.type,
+            slug = EXCLUDED.slug,
+            tier = EXCLUDED.tier,
+            status = EXCLUDED.status,
+            stripe_session_id = EXCLUDED.stripe_session_id,
+            stripe_customer_id = EXCLUDED.stripe_customer_id,
+            stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+            updated_at = EXCLUDED.updated_at
+        `,
+        [
+          grant.id,
+          grant.studentId,
+          grant.type,
+          grant.slug || null,
+          grant.tier || null,
+          grant.status || "active",
+          grant.stripeSessionId || null,
+          grant.stripeCustomerId || null,
+          grant.stripeSubscriptionId || null,
+          grant.createdAt,
+          grant.updatedAt || null
+        ]
+      );
+    }
+    return;
+  }
+
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(ACCESS_GRANTS_FILE, JSON.stringify(grants, null, 2));
+}
+
 async function readSubmissions() {
   const pool = await getDbPool();
   if (pool) {
@@ -426,10 +534,55 @@ async function verifyPassword(password, storedPassword) {
   return storedBuffer.length === hash.length && timingSafeEqual(storedBuffer, hash);
 }
 
+function getAppBaseUrl(req) {
+  if (APP_URL) return APP_URL.replace(/\/$/, "");
+  const proto = req.headers["x-forwarded-proto"] || "http";
+  return `${proto}://${req.headers.host}`;
+}
+
+function parsePriceToCents(price) {
+  const match = String(price || "").match(/\$([0-9]+(?:\.[0-9]{1,2})?)/);
+  return match ? Math.round(Number(match[1]) * 100) : 0;
+}
+
+function courseIsFree(course) {
+  return !course || course.price === "Free" || freeCourseSlugs.has(course.slug);
+}
+
+function tierAllowsCourse(tier, course) {
+  if (tier === "inner-circle") return true;
+  if (tier === "academy-elite") return course.access !== "Founder Shield";
+  return false;
+}
+
+function hasCourseAccess(grants, course) {
+  if (courseIsFree(course)) return true;
+  return grants.some((grant) => {
+    if (!activeAccessStatuses.has(grant.status)) return false;
+    if (grant.type === "course" && grant.slug === course.slug) return true;
+    if (grant.type === "membership" && tierAllowsCourse(grant.tier, course)) return true;
+    return false;
+  });
+}
+
+async function getStripeClient() {
+  if (!STRIPE_SECRET_KEY || !STRIPE_WEBHOOK_SECRET) return null;
+  if (!stripeClientPromise) {
+    stripeClientPromise = import("stripe").then(({ default: Stripe }) => new Stripe(STRIPE_SECRET_KEY));
+  }
+  return stripeClientPromise;
+}
+
 async function readBody(req) {
   let body = "";
   for await (const chunk of req) body += chunk;
   return body ? JSON.parse(body) : {};
+}
+
+async function readRawBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
 }
 
 async function handleSignup(req, res) {
@@ -540,10 +693,12 @@ async function handleAdminSummary(req, res) {
   const notes = await readAdminNotes();
   const enrollments = await readEnrollments();
   const submissions = await readSubmissions();
+  const accessGrants = await readAccessGrants();
   const students = accounts.map((account) => ({
     ...publicStudent(account),
     note: notes[account.id] || "",
     status: notes[`${account.id}:status`] || "Active",
+    accessGrants: accessGrants.filter((grant) => grant.studentId === account.id),
     enrollments: enrollments.filter((enrollment) => enrollment.studentId === account.id),
     submissions: submissions.filter((submission) => submission.studentId === account.id)
   }));
@@ -555,6 +710,7 @@ async function handleAdminSummary(req, res) {
       notes: Object.keys(notes).filter((key) => !key.endsWith(":status")).length,
       enrollments: enrollments.length,
       submissions: submissions.length,
+      paidAccess: accessGrants.filter((grant) => activeAccessStatuses.has(grant.status)).length,
       latestSignup: students.at(-1)?.createdAt || null
     },
     students
@@ -588,15 +744,20 @@ async function handleEnroll(req, res) {
   const student = await getSessionStudent(req);
   if (!student) return sendJson(res, 401, { error: "Student login required." });
 
-  const { slug, price } = await readBody(req);
+  const { slug } = await readBody(req);
   const courseSlug = String(slug || "").trim();
   if (!courseSlug) return sendJson(res, 400, { error: "Course slug is required." });
+  const course = getCourse(courseSlug);
+  if (!course) return sendJson(res, 404, { error: "Course not found." });
 
-  if (!freeCourseSlugs.has(courseSlug) && String(price || "") !== "Free") {
+  const accessGrants = await readAccessGrants();
+  const studentGrants = accessGrants.filter((grant) => grant.studentId === student.id);
+  if (!hasCourseAccess(studentGrants, course)) {
     return sendJson(res, 402, {
       error: "Payment required before enrollment.",
       paymentRequired: true,
-      checkoutMode: "placeholder"
+      checkoutPath: "/api/payments/checkout",
+      checkoutAvailable: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET)
     });
   }
 
@@ -615,6 +776,232 @@ async function handleEnroll(req, res) {
   enrollments.push(enrollment);
   await saveEnrollments(enrollments);
   return sendJson(res, 201, { enrollment });
+}
+
+async function createEnrollmentIfMissing(studentId, courseSlug, status = "Enrolled") {
+  const enrollments = await readEnrollments();
+  const existing = enrollments.find((enrollment) => enrollment.studentId === studentId && enrollment.slug === courseSlug);
+  if (existing) return existing;
+
+  const enrollment = {
+    id: randomUUID(),
+    studentId,
+    slug: courseSlug,
+    status,
+    progress: 0,
+    createdAt: new Date().toISOString()
+  };
+  enrollments.push(enrollment);
+  await saveEnrollments(enrollments);
+  return enrollment;
+}
+
+async function upsertAccessGrant(grantData) {
+  const grants = await readAccessGrants();
+  const existing = grants.find(
+    (grant) =>
+      (grantData.stripeSessionId && grant.stripeSessionId === grantData.stripeSessionId) ||
+      (grantData.stripeSubscriptionId && grant.stripeSubscriptionId === grantData.stripeSubscriptionId) ||
+      (grant.studentId === grantData.studentId &&
+        grant.type === grantData.type &&
+        grant.slug === (grantData.slug || "") &&
+        grant.tier === (grantData.tier || ""))
+  );
+
+  if (existing) {
+    Object.assign(existing, {
+      ...grantData,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString()
+    });
+  } else {
+    grants.push({
+      id: randomUUID(),
+      status: "active",
+      slug: "",
+      tier: "",
+      createdAt: new Date().toISOString(),
+      ...grantData
+    });
+  }
+
+  await saveAccessGrants(grants);
+}
+
+async function handleCreateCheckout(req, res) {
+  try {
+    const student = await getSessionStudent(req);
+    if (!student) return sendJson(res, 401, { error: "Student login required." });
+
+    const stripe = await getStripeClient();
+    if (!stripe) {
+      return sendJson(res, 503, {
+        error: "Stripe is not fully configured yet. Add STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET before taking payment."
+      });
+    }
+
+    const { slug, tier } = await readBody(req);
+    const tierSlug = String(tier || "").trim();
+    const courseSlug = String(slug || "").trim();
+    const baseUrl = getAppBaseUrl(req);
+    let sessionConfig;
+
+    if (tierSlug) {
+      const selectedTier = vipTiers[tierSlug];
+      if (!selectedTier) return sendJson(res, 400, { error: "Unknown VIP tier." });
+
+      sessionConfig = {
+        mode: "subscription",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              recurring: { interval: selectedTier.interval },
+              product_data: {
+                name: `Virtuoso Academy - ${selectedTier.name}`,
+                description: selectedTier.description
+              },
+              unit_amount: selectedTier.amount
+            },
+            quantity: 1
+          }
+        ],
+        success_url: `${baseUrl}/dashboard?checkout=success`,
+        cancel_url: `${baseUrl}/courses?checkout=cancelled#pricing`,
+        metadata: {
+          studentId: student.id,
+          type: "membership",
+          tier: tierSlug
+        }
+      };
+    } else if (courseSlug) {
+      const course = getCourse(courseSlug);
+      if (!course) return sendJson(res, 404, { error: "Course not found." });
+      if (courseIsFree(course)) return sendJson(res, 400, { error: "That course is already free. Enroll directly." });
+
+      sessionConfig = {
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `Virtuoso Academy - ${course.title}`,
+                description: course.summary
+              },
+              unit_amount: parsePriceToCents(course.price)
+            },
+            quantity: 1
+          }
+        ],
+        success_url: `${baseUrl}/dashboard?checkout=success`,
+        cancel_url: `${baseUrl}/courses/${course.slug}?checkout=cancelled`,
+        metadata: {
+          studentId: student.id,
+          type: "course",
+          slug: course.slug
+        }
+      };
+    } else {
+      return sendJson(res, 400, { error: "Choose a course or VIP tier before checkout." });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      ...sessionConfig,
+      customer_email: student.email,
+      client_reference_id: student.id,
+      allow_promotion_codes: true
+    });
+
+    return sendJson(res, 200, { url: session.url });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message });
+  }
+}
+
+async function fulfillCheckoutSession(session) {
+  const metadata = session.metadata || {};
+  const studentId = metadata.studentId || session.client_reference_id;
+  if (!studentId) return;
+
+  if (metadata.type === "membership" && metadata.tier && vipTiers[metadata.tier]) {
+    await upsertAccessGrant({
+      studentId,
+      type: "membership",
+      tier: metadata.tier,
+      status: "active",
+      stripeSessionId: session.id,
+      stripeCustomerId: String(session.customer || ""),
+      stripeSubscriptionId: String(session.subscription || ""),
+      updatedAt: new Date().toISOString()
+    });
+    return;
+  }
+
+  if (metadata.type === "course" && metadata.slug) {
+    const course = getCourse(metadata.slug);
+    if (!course) return;
+    await upsertAccessGrant({
+      studentId,
+      type: "course",
+      slug: course.slug,
+      status: "active",
+      stripeSessionId: session.id,
+      stripeCustomerId: String(session.customer || ""),
+      updatedAt: new Date().toISOString()
+    });
+    await createEnrollmentIfMissing(studentId, course.slug, "Paid access");
+  }
+}
+
+async function markSubscriptionAccess(subscriptionId, status) {
+  if (!subscriptionId) return;
+  const grants = await readAccessGrants();
+  let changed = false;
+
+  for (const grant of grants) {
+    if (grant.stripeSubscriptionId === subscriptionId) {
+      grant.status = status;
+      grant.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+
+  if (changed) await saveAccessGrants(grants);
+}
+
+async function handleStripeWebhook(req, res) {
+  try {
+    const stripe = await getStripeClient();
+    if (!stripe) {
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("Stripe is not fully configured.");
+    }
+
+    const signature = req.headers["stripe-signature"];
+    const rawBody = await readRawBody(req);
+    const event = stripe.webhooks.constructEvent(rawBody, signature, STRIPE_WEBHOOK_SECRET);
+
+    if (event.type === "checkout.session.completed") {
+      await fulfillCheckoutSession(event.data.object);
+    }
+
+    if (event.type === "customer.subscription.deleted") {
+      await markSubscriptionAccess(event.data.object.id, "inactive");
+    }
+
+    if (event.type === "customer.subscription.updated") {
+      const subscription = event.data.object;
+      const status = activeAccessStatuses.has(subscription.status) ? "active" : "inactive";
+      await markSubscriptionAccess(subscription.id, status);
+    }
+
+    return sendJson(res, 200, { received: true });
+  } catch (error) {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end(`Webhook error: ${error.message}`);
+  }
 }
 
 async function handleMySubmissions(req, res) {
@@ -640,6 +1027,15 @@ async function handleCreateSubmission(req, res) {
 
   if (!courseSlug || !submissionTitle || submissionBody.length < 20) {
     return sendJson(res, 400, { error: "Choose a course, name the submission, and bring at least 20 characters of work." });
+  }
+
+  const course = getCourse(courseSlug);
+  if (!course) return sendJson(res, 404, { error: "Course not found." });
+
+  const accessGrants = await readAccessGrants();
+  const studentGrants = accessGrants.filter((grant) => grant.studentId === student.id);
+  if (!hasCourseAccess(studentGrants, course)) {
+    return sendJson(res, 402, { error: "Paid access is required before submitting work for that course." });
   }
 
   const enrollments = await readEnrollments();
@@ -750,13 +1146,15 @@ async function handleHealth(req, res) {
     return sendJson(res, 200, {
       ok: true,
       storage: pool ? "postgres" : "json",
-      databaseReady: Boolean(pool)
+      databaseReady: Boolean(pool),
+      stripeReady: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET)
     });
   } catch (error) {
     return sendJson(res, 500, {
       ok: false,
       storage: "postgres",
       databaseReady: false,
+      stripeReady: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET),
       error: error.message
     });
   }
@@ -893,6 +1291,10 @@ createServer(async (req, res) => {
     return handleChat(req, res);
   }
 
+  if (req.method === "POST" && req.url === "/api/stripe/webhook") {
+    return handleStripeWebhook(req, res);
+  }
+
   if (req.method === "GET" && req.url === "/api/health") {
     return handleHealth(req, res);
   }
@@ -919,6 +1321,10 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/enrollments/enroll") {
     return handleEnroll(req, res);
+  }
+
+  if (req.method === "POST" && req.url === "/api/payments/checkout") {
+    return handleCreateCheckout(req, res);
   }
 
   if (req.method === "GET" && req.url === "/api/submissions/me") {
@@ -958,4 +1364,5 @@ createServer(async (req, res) => {
   console.log(`Virtuoso Academy MVP running at http://${HOST}:${PORT}`);
   console.log(GEMINI_API_KEY ? `Gemini enabled with ${GEMINI_MODEL}` : "Gemini key not set. Using mentor-tone mock streaming.");
   console.log(ADMIN_PASSWORD === "founder" ? "Admin dev password: founder" : "Admin password loaded from ADMIN_PASSWORD.");
+  console.log(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET ? "Stripe Checkout enabled." : "Stripe keys not set. Paid checkout is locked.");
 });

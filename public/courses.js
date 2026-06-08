@@ -33,3 +33,35 @@ for (const list of lists) {
     )
     .join("");
 }
+
+const checkoutStatus = document.querySelector("#checkoutStatus");
+const tierButtons = document.querySelectorAll("[data-tier-checkout]");
+
+for (const button of tierButtons) {
+  button.addEventListener("click", async () => {
+    const tier = button.dataset.tierCheckout;
+    if (checkoutStatus) checkoutStatus.textContent = "Checking student account...";
+
+    try {
+      const response = await fetch("/api/payments/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier })
+      });
+      const data = await response.json();
+
+      if (response.status === 401) {
+        if (checkoutStatus) checkoutStatus.textContent = "Create or log into your student account first.";
+        window.location.href = "/#join";
+        return;
+      }
+
+      if (!response.ok) throw new Error(data.error || "Checkout is not ready.");
+
+      if (checkoutStatus) checkoutStatus.textContent = "Opening secure checkout...";
+      window.location.href = data.url;
+    } catch (error) {
+      if (checkoutStatus) checkoutStatus.textContent = error.message;
+    }
+  });
+}

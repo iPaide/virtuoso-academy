@@ -720,7 +720,10 @@ h3 {
 }
 
 .pricing-grid article {
+  display: flex;
+  min-width: 0;
   min-height: 260px;
+  flex-direction: column;
   padding: 22px;
   background: rgba(14, 14, 14, 0.96);
 }
@@ -746,6 +749,20 @@ h3 {
 .pricing-grid p {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.pricing-action {
+  width: 100%;
+  margin-top: auto;
+  text-align: center;
+}
+
+.checkout-status {
+  grid-column: 2;
+  min-height: 22px;
+  margin: -8px 0 0;
+  color: var(--gold);
+  font-weight: 850;
 }
 
 .course-lane {
@@ -1565,6 +1582,10 @@ dialog::backdrop {
   .pricing-grid,
   .loop-strip {
     grid-template-columns: 1fr;
+  }
+
+  .checkout-status {
+    grid-column: 1;
   }
 
   .loop-strip.compact article {
