@@ -69,6 +69,14 @@
                   <span>Intervention</span>
                   <strong id="adminInterventionCount">0</strong>
                 </div>
+                <div>
+                  <span>Emails sent</span>
+                  <strong id="adminEmailsSentCount">0</strong>
+                </div>
+                <div>
+                  <span>Email failures</span>
+                  <strong id="adminEmailsFailedCount">0</strong>
+                </div>
               </div>
 
               <section class="admin-attention" aria-label="Founder attention queue">
@@ -109,6 +117,7 @@
                     <textarea id="studentNote" rows="7" placeholder="Private observations, standards, next assignment, or risk flags."></textarea>
                   </label>
                   <button class="primary-button" id="saveStudentNote" type="button">Save founder note</button>
+                  <button class="secondary-button" id="sendInterventionEmail" type="button">Send intervention email</button>
                   <p class="auth-note" id="adminStatusText">Admin portal locked.</p>
                 </section>
               </div>
@@ -121,6 +130,16 @@
                   </div>
                 </div>
                 <div class="admin-submission-list" id="adminSubmissionList"></div>
+              </section>
+
+              <section class="admin-submissions-board" aria-label="Email delivery log">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Email log</p>
+                    <h2>Notifications sent from the academy.</h2>
+                  </div>
+                </div>
+                <div class="admin-submission-list" id="adminEmailLogList"></div>
               </section>
             </div>
           </div>

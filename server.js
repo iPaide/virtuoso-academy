@@ -15,6 +15,9 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 const APP_URL = process.env.APP_URL || "";
 const EXPOSE_RESET_LINKS = process.env.EXPOSE_RESET_LINKS === "true";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || "Virtuoso Academy <onboarding@resend.dev>";
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "support@virtuosoacademy.space";
 const PUBLIC_DIR = join(process.cwd(), "public");
 const DATA_DIR = join(process.cwd(), "data");
 const ACCOUNTS_FILE = join(DATA_DIR, "students.json");
@@ -24,6 +27,7 @@ const SUBMISSIONS_FILE = join(DATA_DIR, "submissions.json");
 const ACCESS_GRANTS_FILE = join(DATA_DIR, "access-grants.json");
 const SESSIONS_FILE = join(DATA_DIR, "student-sessions.json");
 const PASSWORD_RESETS_FILE = join(DATA_DIR, "password-resets.json");
+const EMAIL_LOGS_FILE = join(DATA_DIR, "email-logs.json");
 const scrypt = promisify(nodeScrypt);
 const activeAdminSessions = new Set();
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
@@ -137,6 +141,15 @@ function isAdmin(req) {
   return activeAdminSessions.has(getCookie(req, "va_admin"));
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function publicStudent(account) {
   return {
     id: account.id,
@@ -236,6 +249,17 @@ async function ensureDatabase(pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       expires_at TIMESTAMPTZ NOT NULL,
       used_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS email_logs (
+      id TEXT PRIMARY KEY,
+      student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_id TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS admin_notes (
@@ -533,6 +557,175 @@ async function savePasswordResets(resets) {
 
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(PASSWORD_RESETS_FILE, JSON.stringify(resets, null, 2));
+}
+
+async function readEmailLogs() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 100");
+    return result.rows.map((row) => ({
+      id: row.id,
+      studentId: row.student_id || "",
+      recipient: row.recipient,
+      subject: row.subject,
+      status: row.status,
+      providerId: row.provider_id || "",
+      error: row.error || "",
+      createdAt: toIso(row.created_at)
+    }));
+  }
+
+  try {
+    return JSON.parse(await readFile(EMAIL_LOGS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+async function saveEmailLog(log) {
+  const entry = {
+    id: randomUUID(),
+    studentId: "",
+    providerId: "",
+    error: "",
+    createdAt: new Date().toISOString(),
+    ...log
+  };
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query(
+      `
+        INSERT INTO email_logs (id, student_id, recipient, subject, status, provider_id, error, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `,
+      [entry.id, entry.studentId || null, entry.recipient, entry.subject, entry.status, entry.providerId || null, entry.error || null, entry.createdAt]
+    );
+    return entry;
+  }
+
+  const logs = await readEmailLogs();
+  logs.unshift(entry);
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(EMAIL_LOGS_FILE, JSON.stringify(logs.slice(0, 100), null, 2));
+  return entry;
+}
+
+function renderEmailShell(title, bodyHtml, cta = null) {
+  return `
+    <div style="font-family:Arial,sans-serif;background:#0b0b0b;color:#f7f3ea;padding:28px;">
+      <div style="max-width:640px;margin:0 auto;border:1px solid #3a3324;padding:24px;background:#111;">
+        <p style="color:#f0c35a;font-weight:800;text-transform:uppercase;letter-spacing:.08em;">Virtuoso Academy</p>
+        <h1 style="font-size:28px;line-height:1.05;margin:0 0 16px;">${title}</h1>
+        <div style="color:#c9c2b4;line-height:1.6;font-size:16px;">${bodyHtml}</div>
+        ${
+          cta
+            ? `<p style="margin-top:24px;"><a href="${cta.href}" style="display:inline-block;background:#f0c35a;color:#151007;padding:12px 16px;border-radius:6px;font-weight:800;text-decoration:none;">${cta.label}</a></p>`
+            : ""
+        }
+        <p style="color:#8f8678;font-size:13px;margin-top:24px;">Need help? Contact ${SUPPORT_EMAIL}.</p>
+      </div>
+    </div>
+  `;
+}
+
+async function sendEmail({ studentId = "", to, subject, html, text }) {
+  if (!to) return null;
+  if (!RESEND_API_KEY) {
+    console.log(`Email not configured. Would send "${subject}" to ${to}.`);
+    return saveEmailLog({ studentId, recipient: to, subject, status: "not_configured", error: "RESEND_API_KEY is not set." });
+  }
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: MAIL_FROM,
+        to,
+        subject,
+        html,
+        text
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || data.error || `Resend failed with ${response.status}`);
+    return saveEmailLog({ studentId, recipient: to, subject, status: "sent", providerId: data.id || "" });
+  } catch (error) {
+    return saveEmailLog({ studentId, recipient: to, subject, status: "failed", error: error.message });
+  }
+}
+
+async function sendWelcomeEmail(account) {
+  return sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: "Welcome to Virtuoso Academy",
+    html: renderEmailShell(
+      "Welcome to the academy.",
+      `<p>${escapeHtml(account.name)}, your account is open. Start with a free drill, bring real work, and let the mentor put pressure on the pen.</p>`,
+      { href: `${APP_URL || "https://virtuosoacademy.space"}/dashboard`, label: "Open dashboard" }
+    ),
+    text: `${account.name}, welcome to Virtuoso Academy. Open your dashboard: ${APP_URL || "https://virtuosoacademy.space"}/dashboard`
+  });
+}
+
+async function sendPasswordResetEmail(account, resetUrl) {
+  return sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: "Reset your Virtuoso Academy password",
+    html: renderEmailShell(
+      "Reset your password.",
+      "<p>This link expires in 30 minutes. If you did not request it, ignore this message and keep your account locked down.</p>",
+      { href: resetUrl, label: "Reset password" }
+    ),
+    text: `Reset your Virtuoso Academy password: ${resetUrl}`
+  });
+}
+
+async function sendCritiqueSavedEmail(account, submission, modeLabel) {
+  return sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: `Critique saved: ${submission.title}`,
+    html: renderEmailShell(
+      "Critique is on record.",
+      `<p>Your ${escapeHtml(modeLabel)} critique for <strong>${escapeHtml(submission.title)}</strong> has been saved. Revision is due. Do not admire the feedback; use it.</p>`,
+      { href: `${APP_URL || "https://virtuosoacademy.space"}/dashboard`, label: "Open revision" }
+    ),
+    text: `Your ${modeLabel} critique for "${submission.title}" has been saved. Revision is due.`
+  });
+}
+
+async function sendRevisionSavedEmail(account, submission) {
+  return sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: `Revision saved: ${submission.title}`,
+    html: renderEmailShell(
+      "Version two is on record.",
+      `<p>Your revision for <strong>${escapeHtml(submission.title)}</strong> is saved. Compare it against the critique and keep raising the standard.</p>`,
+      { href: `${APP_URL || "https://virtuosoacademy.space"}/dashboard`, label: "Open dashboard" }
+    ),
+    text: `Your revision for "${submission.title}" is saved.`
+  });
+}
+
+async function sendAccessConfirmationEmail(account, label) {
+  return sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: `Access confirmed: ${label}`,
+    html: renderEmailShell(
+      "Your access is active.",
+      `<p>${escapeHtml(label)} is now active on your Virtuoso Academy account. Step into the room and put the work on record.</p>`,
+      { href: `${APP_URL || "https://virtuosoacademy.space"}/courses`, label: "Open courses" }
+    ),
+    text: `${label} is now active on your Virtuoso Academy account.`
+  });
 }
 
 async function createPasswordReset(studentId) {
@@ -929,6 +1122,7 @@ async function handleSignup(req, res) {
     };
     accounts.push(account);
     await saveAccounts(accounts);
+    await sendWelcomeEmail(account);
 
     const token = await createStudentSession(account.id);
     setSessionCookie(res, token);
@@ -970,6 +1164,7 @@ async function handlePasswordResetRequest(req, res) {
     if (account) {
       const token = await createPasswordReset(account.id);
       resetUrl = `${getAppBaseUrl(req)}/?reset=${encodeURIComponent(token)}#join`;
+      await sendPasswordResetEmail(account, resetUrl);
       if (process.env.NODE_ENV !== "production" || EXPOSE_RESET_LINKS) {
         console.log(`Password reset for ${account.email}: ${resetUrl}`);
       }
@@ -1064,6 +1259,7 @@ async function handleAdminSummary(req, res) {
   const submissions = await readSubmissions();
   const accessGrants = await readAccessGrants();
   const sessions = await readStudentSessions();
+  const emailLogs = await readEmailLogs();
   const validSessionCount = sessions.filter((session) => new Date(session.expiresAt) > new Date()).length;
   const activeGrantCount = accessGrants.filter((grant) => activeAccessStatuses.has(grant.status)).length;
   const students = accounts.map((account) => {
@@ -1117,12 +1313,15 @@ async function handleAdminSummary(req, res) {
       enrollments: enrollments.length,
       submissions: submissions.length,
       paidAccess: activeGrantCount,
+      emailsSent: emailLogs.filter((email) => email.status === "sent").length,
+      emailsFailed: emailLogs.filter((email) => email.status === "failed" || email.status === "not_configured").length,
       needsCritique: submissions.filter((submission) => !submission.critique).length,
       revisionDue: submissions.filter((submission) => submission.status === "Revision due").length,
       interventions: students.filter((student) => student.signals.needsIntervention).length,
       latestSignup: students.at(-1)?.createdAt || null
     },
     attentionQueue,
+    emailLogs,
     submissions: submissions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)),
     students
   });
@@ -1139,6 +1338,30 @@ async function handleAdminNote(req, res) {
   notes[`${studentId}:status`] = String(status || "Active").trim() || "Active";
   await saveAdminNotes(notes);
   return sendJson(res, 200, { ok: true });
+}
+
+async function handleAdminInterventionEmail(req, res) {
+  if (!isAdmin(req)) return sendJson(res, 401, { error: "Admin access required." });
+
+  const { studentId, message } = await readBody(req);
+  const accounts = await readAccounts();
+  const account = accounts.find((item) => item.id === String(studentId || ""));
+  const body = String(message || "").trim();
+  if (!account || body.length < 12) return sendJson(res, 400, { error: "Choose a student and write a real intervention note." });
+
+  const log = await sendEmail({
+    studentId: account.id,
+    to: account.email,
+    subject: "A note from Virtuoso Academy",
+    html: renderEmailShell(
+      "Founder note.",
+      `<p>${escapeHtml(body).replaceAll("\n", "<br>")}</p>`,
+      { href: `${APP_URL || "https://virtuosoacademy.space"}/dashboard`, label: "Open dashboard" }
+    ),
+    text: body
+  });
+
+  return sendJson(res, 200, { ok: true, email: log });
 }
 
 async function handleMyEnrollments(req, res) {
@@ -1348,6 +1571,8 @@ async function fulfillCheckoutSession(session) {
       stripeSubscriptionId: String(session.subscription || ""),
       updatedAt: new Date().toISOString()
     });
+    const account = (await readAccounts()).find((item) => item.id === studentId);
+    if (account) await sendAccessConfirmationEmail(account, vipTiers[metadata.tier].name);
     return;
   }
 
@@ -1364,6 +1589,8 @@ async function fulfillCheckoutSession(session) {
       updatedAt: new Date().toISOString()
     });
     await createEnrollmentIfMissing(studentId, course.slug, "Paid access");
+    const account = (await readAccounts()).find((item) => item.id === studentId);
+    if (account) await sendAccessConfirmationEmail(account, course.title);
   }
 }
 
@@ -1516,6 +1743,7 @@ async function handleCritiqueSubmission(req, res) {
   submission.updatedAt = new Date().toISOString();
   await saveSubmissions(submissions);
   await updateEnrollmentAfterSubmission(student.id, submission.slug, "Revision due", 65);
+  await sendCritiqueSavedEmail(student, submission, "Saved critique");
 
   return sendJson(res, 200, { submission });
 }
@@ -1544,6 +1772,7 @@ async function handleSaveMentorCritique(req, res) {
   submission.updatedAt = new Date().toISOString();
   await saveSubmissions(submissions);
   await updateEnrollmentAfterSubmission(student.id, submission.slug, "Revision due", 65);
+  await sendCritiqueSavedEmail(student, submission, selectedMode.label);
 
   return sendJson(res, 200, { submission });
 }
@@ -1575,6 +1804,7 @@ async function handleReviseSubmission(req, res) {
   submission.updatedAt = new Date().toISOString();
   await saveSubmissions(submissions);
   await updateEnrollmentAfterSubmission(student.id, submission.slug, "Revised", 90);
+  await sendRevisionSavedEmail(student, submission);
 
   return sendJson(res, 200, { submission });
 }
@@ -1587,7 +1817,8 @@ async function handleHealth(req, res) {
       ok: true,
       storage: pool ? "postgres" : "json",
       databaseReady: Boolean(pool),
-      stripeReady: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET)
+      stripeReady: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET),
+      emailReady: Boolean(RESEND_API_KEY)
     });
   } catch (error) {
     return sendJson(res, 500, {
@@ -1595,6 +1826,7 @@ async function handleHealth(req, res) {
       storage: "postgres",
       databaseReady: false,
       stripeReady: Boolean(STRIPE_SECRET_KEY && STRIPE_WEBHOOK_SECRET),
+      emailReady: Boolean(RESEND_API_KEY),
       error: error.message
     });
   }
@@ -1827,6 +2059,10 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/admin/note") {
     return handleAdminNote(req, res);
+  }
+
+  if (req.method === "POST" && req.url === "/api/admin/intervention-email") {
+    return handleAdminInterventionEmail(req, res);
   }
 
   return serveStatic(req, res);

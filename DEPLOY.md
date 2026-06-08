@@ -11,6 +11,9 @@ This app is configured for Render with `render.yaml`, including a Render Postgre
    - `GEMINI_API_KEY` when ready for live AI responses
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
+   - `RESEND_API_KEY` for live transactional email
+   - `MAIL_FROM` using a verified sender, for example `Virtuoso Academy <founder@virtuosoacademy.space>`
+   - `SUPPORT_EMAIL`
 4. Deploy.
 
 Student accounts, enrollments, submissions, critiques, revisions, and founder notes use Postgres when `DATABASE_URL` is present. Local development falls back to ignored JSON files in `data/`.
@@ -39,3 +42,22 @@ Access rules:
 Student login sessions are stored server-side and survive deploys/restarts when Postgres is connected. Password reset tokens are one-time use, stored hashed, and expire after 30 minutes.
 
 For local testing only, set `EXPOSE_RESET_LINKS=true` to return reset links in the API response. Keep it off in production unless you are deliberately testing; live reset delivery should be connected to an email provider before public launch.
+
+## Email Delivery
+
+Transactional email uses Resend when `RESEND_API_KEY` is present. Without that key, the app still logs every attempted email in the admin portal so the workflow can be tested safely.
+
+Email events currently covered:
+- Welcome email after student signup.
+- Password reset email.
+- Stripe access confirmation after successful checkout.
+- Critique saved notification.
+- Revision saved notification.
+- Founder intervention email from the admin portal.
+
+Before public launch:
+1. Verify `virtuosoacademy.space` inside Resend.
+2. Set `RESEND_API_KEY` in Render.
+3. Set `MAIL_FROM` to a sender on the verified domain.
+4. Set `SUPPORT_EMAIL` to the inbox students should use for help.
+5. Visit `/api/health` and confirm `emailReady` is `true`.

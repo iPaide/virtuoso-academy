@@ -16,8 +16,11 @@ const adminElements = {
   needsCritiqueCount: document.querySelector("#adminNeedsCritiqueCount"),
   revisionDueCount: document.querySelector("#adminRevisionDueCount"),
   interventionCount: document.querySelector("#adminInterventionCount"),
+  emailsSentCount: document.querySelector("#adminEmailsSentCount"),
+  emailsFailedCount: document.querySelector("#adminEmailsFailedCount"),
   attentionList: document.querySelector("#adminAttentionList"),
   submissionList: document.querySelector("#adminSubmissionList"),
+  emailLogList: document.querySelector("#adminEmailLogList"),
   studentList: document.querySelector("#adminStudentList"),
   selectedStudentName: document.querySelector("#selectedStudentName"),
   selectedStudentMeta: document.querySelector("#selectedStudentMeta"),
@@ -27,12 +30,14 @@ const adminElements = {
   studentStatus: document.querySelector("#studentStatus"),
   studentNote: document.querySelector("#studentNote"),
   saveStudentNote: document.querySelector("#saveStudentNote"),
+  sendInterventionEmail: document.querySelector("#sendInterventionEmail"),
   statusText: document.querySelector("#adminStatusText")
 };
 
 let adminStudents = [];
 let adminSubmissions = [];
 let attentionQueue = [];
+let emailLogs = [];
 let selectedAdminStudentId = null;
 
 function escapeHtml(value) {
@@ -155,6 +160,28 @@ function renderSubmissionBoard() {
     .join("");
 }
 
+function renderEmailLogs() {
+  if (!emailLogs.length) {
+    adminElements.emailLogList.innerHTML = `<article><strong>No email activity yet</strong><p>Welcome, reset, access, critique, and intervention emails will appear here.</p></article>`;
+    return;
+  }
+
+  adminElements.emailLogList.innerHTML = emailLogs
+    .slice(0, 20)
+    .map((email) => {
+      const failed = email.status === "failed" || email.status === "not_configured";
+      return `
+        <article class="${failed ? "needs-critique" : ""}">
+          <span class="student-status ${statusClass(email.status)}">${escapeHtml(email.status)}</span>
+          <strong>${escapeHtml(email.subject)}</strong>
+          <p>${escapeHtml(email.recipient)} · ${formatDate(email.createdAt)}</p>
+          ${email.error ? `<p>${escapeHtml(email.error)}</p>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function selectAdminStudent(studentId) {
   selectedAdminStudentId = studentId;
   const student = adminStudents.find((item) => item.id === studentId);
@@ -205,13 +232,17 @@ function renderAdminSummary(summary) {
   adminElements.needsCritiqueCount.textContent = String(summary.metrics.needsCritique || 0);
   adminElements.revisionDueCount.textContent = String(summary.metrics.revisionDue || 0);
   adminElements.interventionCount.textContent = String(summary.metrics.interventions || 0);
+  adminElements.emailsSentCount.textContent = String(summary.metrics.emailsSent || 0);
+  adminElements.emailsFailedCount.textContent = String(summary.metrics.emailsFailed || 0);
   adminStudents = summary.students;
   adminSubmissions = summary.submissions || [];
   attentionQueue = summary.attentionQueue || [];
+  emailLogs = summary.emailLogs || [];
   if (!selectedAdminStudentId && adminStudents.length) selectedAdminStudentId = adminStudents[0].id;
   renderAdminStudents();
   renderAttentionQueue();
   renderSubmissionBoard();
+  renderEmailLogs();
   if (selectedAdminStudentId) selectAdminStudent(selectedAdminStudentId);
 }
 
@@ -250,16 +281,50 @@ async function saveAdminNote() {
   }
 }
 
+async function sendInterventionEmail() {
+  if (!selectedAdminStudentId) {
+    adminElements.statusText.textContent = "Select a student first.";
+    return;
+  }
+
+  const message = adminElements.studentNote.value.trim();
+  if (message.length < 12) {
+    adminElements.statusText.textContent = "Write a real founder note before sending an email.";
+    return;
+  }
+
+  adminElements.sendInterventionEmail.disabled = true;
+  adminElements.statusText.textContent = "Sending intervention email...";
+  try {
+    await adminRequest("/api/admin/intervention-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        studentId: selectedAdminStudentId,
+        message
+      })
+    });
+    adminElements.statusText.textContent = "Intervention email logged.";
+    await loadAdminSummary();
+  } catch (error) {
+    adminElements.statusText.textContent = error.message;
+  } finally {
+    adminElements.sendInterventionEmail.disabled = false;
+  }
+}
+
 async function adminLogout() {
   await fetch("/api/admin/logout", { method: "POST" });
   selectedAdminStudentId = null;
   adminStudents = [];
   adminSubmissions = [];
   attentionQueue = [];
+  emailLogs = [];
   setAdminUnlocked(false);
   renderAdminStudents();
   renderAttentionQueue();
   renderSubmissionBoard();
+  renderEmailLogs();
   adminElements.selectedStudentName.textContent = "No student selected";
   adminElements.selectedStudentMeta.textContent = "Choose a student from the directory.";
   adminElements.selectedStudentSignals.innerHTML = "";
@@ -295,5 +360,6 @@ adminElements.form.addEventListener("submit", async (event) => {
 adminElements.refreshButton.addEventListener("click", loadAdminSummary);
 adminElements.logoutButton.addEventListener("click", adminLogout);
 adminElements.saveStudentNote.addEventListener("click", saveAdminNote);
+adminElements.sendInterventionEmail.addEventListener("click", sendInterventionEmail);
 
 loadAdminSummary();
