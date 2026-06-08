@@ -33,3 +33,9 @@ Access rules:
 - Academy Elite: subscription access to VIP courses except Founder Shield.
 - Inner Circle: subscription access to all premium courses, including Founder Shield.
 - Individual premium course checkout grants access to that specific course.
+
+## Authentication
+
+Student login sessions are stored server-side and survive deploys/restarts when Postgres is connected. Password reset tokens are one-time use, stored hashed, and expire after 30 minutes.
+
+For local testing only, set `EXPOSE_RESET_LINKS=true` to return reset links in the API response. Keep it off in production unless you are deliberately testing; live reset delivery should be connected to an email provider before public launch.

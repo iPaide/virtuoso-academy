@@ -30,7 +30,9 @@ const elements = {
   authNote: document.querySelector("#authNote"),
   signupTab: document.querySelector("#signupTab"),
   loginTab: document.querySelector("#loginTab"),
+  resetTab: document.querySelector("#resetTab"),
   closeAuth: document.querySelector("#closeAuth"),
+  resetToken: document.querySelector("#resetToken"),
   artistName: document.querySelector("#artistName"),
   artistEmail: document.querySelector("#artistEmail"),
   artistPassword: document.querySelector("#artistPassword"),
@@ -159,16 +161,42 @@ function summarizeTitle(content) {
 function setAuthMode(mode) {
   authMode = mode;
   const isSignup = mode === "signup";
-  elements.authTitle.textContent = isSignup ? "Create your student account" : "Log in to your profile";
-  elements.authSubmit.textContent = isSignup ? "Create account" : "Log in";
+  const isLogin = mode === "login";
+  const isResetRequest = mode === "reset-request";
+  const isResetConfirm = mode === "reset-confirm";
+
+  elements.authTitle.textContent = isSignup
+    ? "Create your student account"
+    : isLogin
+      ? "Log in to your profile"
+      : isResetConfirm
+        ? "Set a new password"
+        : "Reset your password";
+  elements.authSubmit.textContent = isSignup
+    ? "Create account"
+    : isLogin
+      ? "Log in"
+      : isResetConfirm
+        ? "Set new password"
+        : "Send reset link";
   elements.artistName.closest("label").classList.toggle("hidden", !isSignup);
+  elements.artistEmail.closest("label").classList.toggle("hidden", isResetConfirm);
+  elements.artistPassword.closest("label").classList.toggle("hidden", isResetRequest);
   elements.artistName.required = isSignup;
-  elements.artistPassword.autocomplete = isSignup ? "new-password" : "current-password";
+  elements.artistEmail.required = !isResetConfirm;
+  elements.artistPassword.required = !isResetRequest;
+  elements.artistPassword.minLength = isSignup || isResetConfirm ? 8 : 6;
+  elements.artistPassword.autocomplete = isSignup || isResetConfirm ? "new-password" : "current-password";
   elements.authNote.textContent = isSignup
     ? "Create a student account to unlock your academy profile and return to your work."
-    : "Use the email and password you created for Virtuoso Academy.";
+    : isLogin
+      ? "Use the email and password you created for Virtuoso Academy."
+      : isResetConfirm
+        ? "Choose a stronger password: at least 8 characters with a letter and a number."
+        : "Enter your account email. If it exists, a reset link will be prepared.";
   elements.signupTab.classList.toggle("active", isSignup);
-  elements.loginTab.classList.toggle("active", !isSignup);
+  elements.loginTab.classList.toggle("active", isLogin);
+  elements.resetTab.classList.toggle("active", isResetRequest || isResetConfirm);
 }
 
 function openAuth(mode = profile?.name ? "login" : "signup") {
@@ -187,6 +215,17 @@ async function authRequest(path, payload) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Student access failed.");
   return data.student;
+}
+
+async function resetRequest(payload) {
+  const response = await fetch("/api/auth/password-reset/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Password reset failed.");
+  return data;
 }
 
 async function loadCurrentStudent() {
@@ -285,15 +324,36 @@ elements.startAccountButton.addEventListener("click", () => {
 });
 elements.signupTab.addEventListener("click", () => setAuthMode("signup"));
 elements.loginTab.addEventListener("click", () => setAuthMode("login"));
+elements.resetTab.addEventListener("click", () => setAuthMode("reset-request"));
 elements.closeAuth.addEventListener("click", () => elements.authDialog.close());
 elements.authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const name = elements.artistName.value.trim();
   const email = elements.artistEmail.value.trim();
   const password = elements.artistPassword.value;
+  const token = elements.resetToken.value;
 
   try {
-    profile = await authRequest(authMode === "signup" ? "/api/auth/signup" : "/api/auth/login", { name, email, password });
+    if (authMode === "reset-request") {
+      const data = await resetRequest({ email });
+      elements.authNote.textContent = data.resetUrl ? "Reset link ready for testing: " : data.message;
+      if (data.resetUrl) {
+        const link = document.createElement("a");
+        link.href = data.resetUrl;
+        link.textContent = "open reset link";
+        elements.authNote.append(link);
+      }
+      return;
+    }
+
+    profile = await authRequest(
+      authMode === "signup"
+        ? "/api/auth/signup"
+        : authMode === "reset-confirm"
+          ? "/api/auth/password-reset/confirm"
+          : "/api/auth/login",
+      authMode === "reset-confirm" ? { token, password } : { name, email, password }
+    );
     localStorage.setItem(storageKeys.profile, JSON.stringify(profile));
     elements.authDialog.close();
     elements.authForm.reset();
@@ -322,3 +382,9 @@ elements.chatForm.addEventListener("submit", async (event) => {
 if (!sessions.length) createSession();
 render();
 loadCurrentStudent();
+
+const resetToken = new URLSearchParams(window.location.search).get("reset");
+if (resetToken) {
+  elements.resetToken.value = resetToken;
+  openAuth("reset-confirm");
+}

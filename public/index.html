@@ -285,7 +285,9 @@
         <div class="auth-tabs" role="tablist" aria-label="Student access mode">
           <button class="auth-tab active" id="signupTab" type="button">Sign up</button>
           <button class="auth-tab" id="loginTab" type="button">Log in</button>
+          <button class="auth-tab" id="resetTab" type="button">Reset</button>
         </div>
+        <input id="resetToken" name="resetToken" type="hidden" />
         <label>
           Artist name
           <input id="artistName" name="artistName" autocomplete="name" placeholder="Your stage name" required />
@@ -296,10 +298,10 @@
         </label>
         <label>
           Password
-          <input id="artistPassword" name="artistPassword" type="password" autocomplete="current-password" placeholder="Minimum 6 characters" minlength="6" required />
+          <input id="artistPassword" name="artistPassword" type="password" autocomplete="current-password" placeholder="Minimum 8 characters, letter and number" minlength="8" required />
         </label>
         <p class="auth-note" id="authNote">
-          MVP note: student access is saved in this browser for testing. Production will use secure server authentication.
+          Student access uses secure server sessions. Keep your password private and reset it if the account ever feels exposed.
         </p>
         <div class="dialog-actions">
           <button class="secondary-button" value="cancel" type="button" id="closeAuth">Cancel</button>

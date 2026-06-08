@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { randomBytes, randomUUID, scrypt as nodeScrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as nodeScrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { getCourse } from "./public/course-data.js";
 
@@ -14,6 +14,7 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 const APP_URL = process.env.APP_URL || "";
+const EXPOSE_RESET_LINKS = process.env.EXPOSE_RESET_LINKS === "true";
 const PUBLIC_DIR = join(process.cwd(), "public");
 const DATA_DIR = join(process.cwd(), "data");
 const ACCOUNTS_FILE = join(DATA_DIR, "students.json");
@@ -21,9 +22,12 @@ const ADMIN_NOTES_FILE = join(DATA_DIR, "admin-notes.json");
 const ENROLLMENTS_FILE = join(DATA_DIR, "enrollments.json");
 const SUBMISSIONS_FILE = join(DATA_DIR, "submissions.json");
 const ACCESS_GRANTS_FILE = join(DATA_DIR, "access-grants.json");
+const SESSIONS_FILE = join(DATA_DIR, "student-sessions.json");
+const PASSWORD_RESETS_FILE = join(DATA_DIR, "password-resets.json");
 const scrypt = promisify(nodeScrypt);
-const activeSessions = new Map();
 const activeAdminSessions = new Set();
+const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const passwordResetMaxAgeMinutes = 30;
 const freeCourseSlugs = new Set(["image-over-explanation", "metronome-read-through", "no-excuse-weekly-plan", "ownership-checklist"]);
 const activeAccessStatuses = new Set(["active", "paid", "trialing"]);
 const vipTiers = {
@@ -42,6 +46,7 @@ const vipTiers = {
 };
 let dbPoolPromise = null;
 let stripeClientPromise = null;
+const authAttempts = new Map();
 
 const systemInstruction = `PURPOSE
 You are the core AI Mentor for Virtuoso Academy, a legacy talent-development platform built to discover, sharpen, protect, and elevate upcoming artists. The academy turns a lifetime of leadership, discipline, and strategic experience into a digital studio and sanctuary for serious creators. Your mission is to cultivate raw talent, demand absolute dedication to the craft, and prepare artists mentally and strategically for the harsh realities of the music and creative industries.
@@ -85,20 +90,24 @@ function getCookie(req, name) {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
 }
 
+function cookieOptions(maxAge) {
+  return `HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`;
+}
+
 function setSessionCookie(res, token) {
-  res.setHeader("Set-Cookie", `va_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  res.setHeader("Set-Cookie", `va_session=${encodeURIComponent(token)}; ${cookieOptions(sessionMaxAgeSeconds)}`);
 }
 
 function clearSessionCookie(res) {
-  res.setHeader("Set-Cookie", "va_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  res.setHeader("Set-Cookie", `va_session=; ${cookieOptions(0)}`);
 }
 
 function setAdminCookie(res, token) {
-  res.setHeader("Set-Cookie", `va_admin=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  res.setHeader("Set-Cookie", `va_admin=${encodeURIComponent(token)}; ${cookieOptions(604800)}`);
 }
 
 function clearAdminCookie(res) {
-  res.setHeader("Set-Cookie", "va_admin=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  res.setHeader("Set-Cookie", `va_admin=; ${cookieOptions(0)}`);
 }
 
 function isAdmin(req) {
@@ -186,6 +195,24 @@ async function ensureDatabase(pool) {
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS student_sessions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      token_hash TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      last_seen_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      token_hash TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS admin_notes (
@@ -293,6 +320,274 @@ async function saveAccounts(accounts) {
 
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
+}
+
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function createOpaqueToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+function futureIso({ minutes = 0, seconds = 0 }) {
+  return new Date(Date.now() + minutes * 60_000 + seconds * 1000).toISOString();
+}
+
+function validatePassword(password) {
+  const value = String(password || "");
+  if (value.length < 8) return "Password must be at least 8 characters.";
+  if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) return "Password needs at least one letter and one number.";
+  return "";
+}
+
+function isRateLimited(req, bucket, limit = 8, windowMs = 15 * 60_000) {
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+  const key = `${bucket}:${ip}`;
+  const now = Date.now();
+  const hits = (authAttempts.get(key) || []).filter((timestamp) => now - timestamp < windowMs);
+  hits.push(now);
+  authAttempts.set(key, hits);
+  return hits.length > limit;
+}
+
+async function readStudentSessions() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM student_sessions ORDER BY created_at ASC");
+    return result.rows.map((row) => ({
+      id: row.id,
+      studentId: row.student_id,
+      tokenHash: row.token_hash,
+      createdAt: toIso(row.created_at),
+      expiresAt: toIso(row.expires_at),
+      lastSeenAt: toIso(row.last_seen_at)
+    }));
+  }
+
+  try {
+    return JSON.parse(await readFile(SESSIONS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+async function saveStudentSessions(sessions) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const session of sessions) {
+      await pool.query(
+        `
+          INSERT INTO student_sessions (id, student_id, token_hash, created_at, expires_at, last_seen_at)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (id) DO UPDATE SET
+            expires_at = EXCLUDED.expires_at,
+            last_seen_at = EXCLUDED.last_seen_at
+        `,
+        [session.id, session.studentId, session.tokenHash, session.createdAt, session.expiresAt, session.lastSeenAt || null]
+      );
+    }
+    return;
+  }
+
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
+}
+
+async function createStudentSession(studentId) {
+  const token = createOpaqueToken();
+  const session = {
+    id: randomUUID(),
+    studentId,
+    tokenHash: hashToken(token),
+    createdAt: new Date().toISOString(),
+    expiresAt: futureIso({ seconds: sessionMaxAgeSeconds }),
+    lastSeenAt: new Date().toISOString()
+  };
+
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query(
+      `
+        INSERT INTO student_sessions (id, student_id, token_hash, created_at, expires_at, last_seen_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [session.id, session.studentId, session.tokenHash, session.createdAt, session.expiresAt, session.lastSeenAt]
+    );
+    return token;
+  }
+
+  const sessions = await readStudentSessions();
+  sessions.push(session);
+  await saveStudentSessions(sessions);
+  return token;
+}
+
+async function findValidStudentIdFromSession(token) {
+  if (!token) return null;
+  const tokenHash = hashToken(token);
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query("DELETE FROM student_sessions WHERE expires_at <= NOW()");
+    const result = await pool.query("SELECT * FROM student_sessions WHERE token_hash = $1 LIMIT 1", [tokenHash]);
+    const session = result.rows[0];
+    if (!session) return null;
+    await pool.query("UPDATE student_sessions SET last_seen_at = NOW() WHERE id = $1", [session.id]);
+    return session.student_id;
+  }
+
+  const sessions = await readStudentSessions();
+  const now = new Date();
+  let changed = false;
+  let studentId = null;
+  const keptSessions = sessions.filter((session) => {
+    if (new Date(session.expiresAt) <= now) {
+      changed = true;
+      return false;
+    }
+    if (session.tokenHash === tokenHash) {
+      session.lastSeenAt = new Date().toISOString();
+      studentId = session.studentId;
+      changed = true;
+    }
+    return true;
+  });
+
+  if (changed) await saveStudentSessions(keptSessions);
+  return studentId;
+}
+
+async function destroyStudentSession(token) {
+  if (!token) return;
+  const tokenHash = hashToken(token);
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query("DELETE FROM student_sessions WHERE token_hash = $1", [tokenHash]);
+    return;
+  }
+
+  const sessions = await readStudentSessions();
+  const keptSessions = sessions.filter((session) => session.tokenHash !== tokenHash);
+  if (keptSessions.length !== sessions.length) await saveStudentSessions(keptSessions);
+}
+
+async function readPasswordResets() {
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query("SELECT * FROM password_reset_tokens ORDER BY created_at ASC");
+    return result.rows.map((row) => ({
+      id: row.id,
+      studentId: row.student_id,
+      tokenHash: row.token_hash,
+      createdAt: toIso(row.created_at),
+      expiresAt: toIso(row.expires_at),
+      usedAt: toIso(row.used_at)
+    }));
+  }
+
+  try {
+    return JSON.parse(await readFile(PASSWORD_RESETS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+async function savePasswordResets(resets) {
+  const pool = await getDbPool();
+  if (pool) {
+    for (const reset of resets) {
+      await pool.query(
+        `
+          INSERT INTO password_reset_tokens (id, student_id, token_hash, created_at, expires_at, used_at)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at
+        `,
+        [reset.id, reset.studentId, reset.tokenHash, reset.createdAt, reset.expiresAt, reset.usedAt || null]
+      );
+    }
+    return;
+  }
+
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(PASSWORD_RESETS_FILE, JSON.stringify(resets, null, 2));
+}
+
+async function createPasswordReset(studentId) {
+  const token = createOpaqueToken();
+  const reset = {
+    id: randomUUID(),
+    studentId,
+    tokenHash: hashToken(token),
+    createdAt: new Date().toISOString(),
+    expiresAt: futureIso({ minutes: passwordResetMaxAgeMinutes }),
+    usedAt: null
+  };
+
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE student_id = $1 AND used_at IS NULL", [studentId]);
+    await pool.query(
+      `
+        INSERT INTO password_reset_tokens (id, student_id, token_hash, created_at, expires_at, used_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [reset.id, reset.studentId, reset.tokenHash, reset.createdAt, reset.expiresAt, reset.usedAt]
+    );
+    return token;
+  }
+
+  const resets = await readPasswordResets();
+  for (const item of resets) {
+    if (item.studentId === studentId && !item.usedAt) item.usedAt = new Date().toISOString();
+  }
+  resets.push(reset);
+  await savePasswordResets(resets);
+  return token;
+}
+
+async function consumePasswordReset(token) {
+  if (!token) return null;
+  const tokenHash = hashToken(token);
+  const pool = await getDbPool();
+  if (pool) {
+    const result = await pool.query(
+      `
+        SELECT * FROM password_reset_tokens
+        WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+        LIMIT 1
+      `,
+      [tokenHash]
+    );
+    const reset = result.rows[0];
+    if (!reset) return null;
+    await pool.query("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1", [reset.id]);
+    return reset.student_id;
+  }
+
+  const resets = await readPasswordResets();
+  const now = new Date();
+  const reset = resets.find((item) => item.tokenHash === tokenHash && !item.usedAt && new Date(item.expiresAt) > now);
+  if (!reset) return null;
+  reset.usedAt = new Date().toISOString();
+  await savePasswordResets(resets);
+  return reset.studentId;
+}
+
+async function updateAccountPassword(studentId, passwordHash) {
+  const accounts = await readAccounts();
+  const account = accounts.find((item) => item.id === studentId);
+  if (!account) return null;
+  account.passwordHash = passwordHash;
+  await saveAccounts(accounts);
+
+  const pool = await getDbPool();
+  if (pool) {
+    await pool.query("DELETE FROM student_sessions WHERE student_id = $1", [studentId]);
+  } else {
+    const sessions = await readStudentSessions();
+    await saveStudentSessions(sessions.filter((session) => session.studentId !== studentId));
+  }
+  return account;
 }
 
 async function readAdminNotes() {
@@ -587,12 +882,14 @@ async function readRawBody(req) {
 
 async function handleSignup(req, res) {
   try {
+    if (isRateLimited(req, "signup", 6)) return sendJson(res, 429, { error: "Too many account attempts. Give it a few minutes." });
     const { name, email, password } = await readBody(req);
     const normalizedEmail = String(email || "").trim().toLowerCase();
     const studentName = String(name || "").trim();
+    const passwordError = validatePassword(password);
 
-    if (!studentName || !normalizedEmail || String(password || "").length < 6) {
-      return sendJson(res, 400, { error: "Name, email, and a 6-character password are required." });
+    if (!studentName || !normalizedEmail || passwordError) {
+      return sendJson(res, 400, { error: passwordError || "Name, email, and password are required." });
     }
 
     const accounts = await readAccounts();
@@ -610,8 +907,7 @@ async function handleSignup(req, res) {
     accounts.push(account);
     await saveAccounts(accounts);
 
-    const token = randomUUID();
-    activeSessions.set(token, account.id);
+    const token = await createStudentSession(account.id);
     setSessionCookie(res, token);
     return sendJson(res, 201, { student: publicStudent(account) });
   } catch (error) {
@@ -621,6 +917,7 @@ async function handleSignup(req, res) {
 
 async function handleLogin(req, res) {
   try {
+    if (isRateLimited(req, "login", 10)) return sendJson(res, 429, { error: "Too many login attempts. Give it a few minutes." });
     const { email, password } = await readBody(req);
     const normalizedEmail = String(email || "").trim().toLowerCase();
     const accounts = await readAccounts();
@@ -630,9 +927,58 @@ async function handleLogin(req, res) {
       return sendJson(res, 401, { error: "No matching student account found." });
     }
 
-    const token = randomUUID();
-    activeSessions.set(token, account.id);
+    const token = await createStudentSession(account.id);
     setSessionCookie(res, token);
+    return sendJson(res, 200, { student: publicStudent(account) });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message });
+  }
+}
+
+async function handlePasswordResetRequest(req, res) {
+  try {
+    if (isRateLimited(req, "reset", 5)) return sendJson(res, 429, { error: "Too many reset attempts. Give it a few minutes." });
+    const { email } = await readBody(req);
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const accounts = await readAccounts();
+    const account = accounts.find((item) => item.email.toLowerCase() === normalizedEmail);
+    let resetUrl = "";
+
+    if (account) {
+      const token = await createPasswordReset(account.id);
+      resetUrl = `${getAppBaseUrl(req)}/?reset=${encodeURIComponent(token)}#join`;
+      if (process.env.NODE_ENV !== "production" || EXPOSE_RESET_LINKS) {
+        console.log(`Password reset for ${account.email}: ${resetUrl}`);
+      }
+    }
+
+    return sendJson(res, 200, {
+      ok: true,
+      message: "If that email has a Virtuoso Academy account, a reset link is ready.",
+      ...(resetUrl && (process.env.NODE_ENV !== "production" || EXPOSE_RESET_LINKS) ? { resetUrl } : {})
+    });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message });
+  }
+}
+
+async function handlePasswordResetConfirm(req, res) {
+  try {
+    if (isRateLimited(req, "reset-confirm", 8)) return sendJson(res, 429, { error: "Too many reset attempts. Give it a few minutes." });
+    const { token, password } = await readBody(req);
+    const passwordError = validatePassword(password);
+    if (!token || passwordError) {
+      return sendJson(res, 400, { error: passwordError || "A valid reset token is required." });
+    }
+
+    const studentId = await consumePasswordReset(String(token));
+    if (!studentId) return sendJson(res, 400, { error: "Reset link is invalid or expired. Request a fresh one." });
+
+    const account = await updateAccountPassword(studentId, await hashPassword(password));
+    if (!account) return sendJson(res, 404, { error: "Student account not found." });
+
+    const sessionToken = await createStudentSession(account.id);
+    setSessionCookie(res, sessionToken);
     return sendJson(res, 200, { student: publicStudent(account) });
   } catch (error) {
     return sendJson(res, 500, { error: error.message });
@@ -641,7 +987,7 @@ async function handleLogin(req, res) {
 
 async function handleMe(req, res) {
   const token = getCookie(req, "va_session");
-  const studentId = activeSessions.get(token);
+  const studentId = await findValidStudentIdFromSession(token);
   if (!studentId) return sendJson(res, 401, { student: null });
 
   const accounts = await readAccounts();
@@ -652,7 +998,7 @@ async function handleMe(req, res) {
 
 async function getSessionStudent(req) {
   const token = getCookie(req, "va_session");
-  const studentId = activeSessions.get(token);
+  const studentId = await findValidStudentIdFromSession(token);
   if (!studentId) return null;
 
   const accounts = await readAccounts();
@@ -660,9 +1006,9 @@ async function getSessionStudent(req) {
   return account || null;
 }
 
-function handleLogout(req, res) {
+async function handleLogout(req, res) {
   const token = getCookie(req, "va_session");
-  if (token) activeSessions.delete(token);
+  await destroyStudentSession(token);
   clearSessionCookie(res);
   return sendJson(res, 200, { ok: true });
 }
@@ -694,6 +1040,8 @@ async function handleAdminSummary(req, res) {
   const enrollments = await readEnrollments();
   const submissions = await readSubmissions();
   const accessGrants = await readAccessGrants();
+  const sessions = await readStudentSessions();
+  const validSessionCount = sessions.filter((session) => new Date(session.expiresAt) > new Date()).length;
   const students = accounts.map((account) => ({
     ...publicStudent(account),
     note: notes[account.id] || "",
@@ -706,7 +1054,7 @@ async function handleAdminSummary(req, res) {
   return sendJson(res, 200, {
     metrics: {
       students: students.length,
-      activeSessions: activeSessions.size,
+      activeSessions: validSessionCount,
       notes: Object.keys(notes).filter((key) => !key.endsWith(":status")).length,
       enrollments: enrollments.length,
       submissions: submissions.length,
@@ -1306,6 +1654,14 @@ createServer(async (req, res) => {
 
   if (req.method === "POST" && req.url === "/api/auth/login") {
     return handleLogin(req, res);
+  }
+
+  if (req.method === "POST" && req.url === "/api/auth/password-reset/request") {
+    return handlePasswordResetRequest(req, res);
+  }
+
+  if (req.method === "POST" && req.url === "/api/auth/password-reset/confirm") {
+    return handlePasswordResetConfirm(req, res);
   }
 
   if (req.method === "POST" && req.url === "/api/auth/logout") {
