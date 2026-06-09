@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Virtuoso Academy social card</title>
+  <desc id="desc">A dark studio share image with Virtuoso Academy branding.</desc>
+  <defs>
+    <linearGradient id="gold" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#f0c35a"/>
+      <stop offset=".55" stop-color="#f7f3ea"/>
+      <stop offset="1" stop-color="#7f6030"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#080808" stop-opacity=".98"/>
+      <stop offset=".44" stop-color="#080808" stop-opacity=".86"/>
+      <stop offset="1" stop-color="#080808" stop-opacity=".16"/>
+    </linearGradient>
+  </defs>
+  <image href="virtuoso-studio-hero.png" width="1200" height="630" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="1200" height="630" fill="url(#shade)"/>
+  <circle cx="133" cy="121" r="63" fill="#101010" stroke="#f0c35a" stroke-width="8"/>
+  <text x="133" y="137" text-anchor="middle" fill="#f0c35a" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="900">VA</text>
+  <text x="72" y="238" fill="#f0c35a" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="900" letter-spacing="4">VIRTUOSO ACADEMY</text>
+  <text x="72" y="318" fill="#f7f3ea" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="900">Built for the</text>
+  <text x="72" y="388" fill="#f7f3ea" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="900">underdogs.</text>
+  <text x="72" y="432" fill="#d7d0c3" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">Mentorship for the pen, the ring, and the grind.</text>
+  <rect x="72" y="524" width="520" height="8" fill="url(#gold)"/>
+  <text x="1136" y="574" text-anchor="end" fill="#f7f3ea" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800">virtuosoacademy.space</text>
+</svg>

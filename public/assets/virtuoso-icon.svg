@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Virtuoso Academy icon</title>
+  <desc id="desc">A gold VA monogram on a dark academy seal.</desc>
+  <rect width="512" height="512" fill="#0b0b0b"/>
+  <circle cx="256" cy="256" r="214" fill="#111111" stroke="#f0c35a" stroke-width="18"/>
+  <circle cx="256" cy="256" r="174" fill="none" stroke="#7f6030" stroke-width="4"/>
+  <path d="M105 124h78l70 220 70-220h77L291 388h-76L105 124Z" fill="#f7f3ea"/>
+  <path d="M322 388h-68l112-264h75L322 388Z" fill="#f0c35a"/>
+  <path d="M330 299h-95l20-52h94l-19 52Z" fill="#0b0b0b" opacity=".72"/>
+  <text x="256" y="446" text-anchor="middle" fill="#c9c2b4" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" letter-spacing="5">ACADEMY</text>
+</svg>
